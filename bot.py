@@ -253,23 +253,54 @@ async def handle_tech_message(update: Update, context: ContextTypes.DEFAULT_TYPE
     )
     context.user_data['awaiting_tech'] = False
 
-async def main():
-    application = Application.builder().token(TOKEN).build()
-    
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("list", list_products))
-    application.add_handler(CommandHandler("redeem", redeem_key))
-    application.add_handler(CommandHandler("tech", tech_support))
-    
-    application.add_handler(CallbackQueryHandler(product_callback, pattern="^buy_"))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_key_input))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_tech_message))
-    
-    application.add_handler(PreCheckoutQueryHandler(pre_checkout_query))
-    application.add_handler(MessageHandler(filters.SUCCESSFUL_PAYMENT, successful_payment))
-    
-    logger.info("Бот запущен и готов к работе!")
-    await application.run_polling()
+def run_bot():
+    """Функция для запуска бота с правильной обработкой event loop"""
+    try:
+        # Создаем приложение
+        application = Application.builder().token(TOKEN).build()
+        
+        # Команды
+        application.add_handler(CommandHandler("start", start))
+        application.add_handler(CommandHandler("list", list_products))
+        application.add_handler(CommandHandler("redeem", redeem_key))
+        application.add_handler(CommandHandler("tech", tech_support))
+        
+        # Обработчики
+        application.add_handler(CallbackQueryHandler(product_callback, pattern="^buy_"))
+        application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_key_input))
+        application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_tech_message))
+        
+        # Платежи
+        application.add_handler(PreCheckoutQueryHandler(pre_checkout_query))
+        application.add_handler(MessageHandler(filters.SUCCESSFUL_PAYMENT, successful_payment))
+        
+        logger.info("🚀 Бот запущен и готов к работе!")
+        
+        # Запускаем polling
+        application.run_polling(allowed_updates=Update.ALL_TYPES)
+        
+    except RuntimeError as e:
+        if "already running" in str(e):
+            logger.warning("Event loop already running, using get_running_loop()")
+            # Альтернативный способ запуска
+            loop = asyncio.get_running_loop()
+            application = Application.builder().token(TOKEN).build()
+            # Добавляем обработчики (те же самые)
+            application.add_handler(CommandHandler("start", start))
+            application.add_handler(CommandHandler("list", list_products))
+            application.add_handler(CommandHandler("redeem", redeem_key))
+            application.add_handler(CommandHandler("tech", tech_support))
+            application.add_handler(CallbackQueryHandler(product_callback, pattern="^buy_"))
+            application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_key_input))
+            application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_tech_message))
+            application.add_handler(PreCheckoutQueryHandler(pre_checkout_query))
+            application.add_handler(MessageHandler(filters.SUCCESSFUL_PAYMENT, successful_payment))
+            
+            loop.create_task(application.initialize())
+            loop.create_task(application.start())
+            loop.create_task(application.updater.start_polling())
+        else:
+            raise e
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    run_bot()
