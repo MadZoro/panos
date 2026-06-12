@@ -1,4 +1,4 @@
-python-telegram-bot==20.7
+python-telegram-bot==20.6
 supabase==1.2.0
 gotrue==1.1.0
 postgrest==0.12.0
