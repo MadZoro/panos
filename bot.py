@@ -171,9 +171,6 @@ async def redeem_key(update, context):
     context.user_data['awaiting_key'] = True
 
 async def handle_key_input(update, context):
-    if not context.user_data.get('awaiting_key'):
-        return
-    
     key = update.message.text.strip().upper()
     user_id = update.effective_user.id
     
@@ -235,19 +232,18 @@ async def tech_support(update, context):
     context.user_data['awaiting_tech'] = True
 
 async def handle_tech_message(update, context):
-    if not context.user_data.get('awaiting_tech'):
-        return
-    
     user = update.effective_user
     message_text = update.message.text
     
     try:
         await context.bot.send_message(
             chat_id=ADMIN_CHAT_ID,
-            text=f"НОВОЕ ОБРАЩЕНИЕ В ТП\n\n"
-                 f"Пользователь: @{user.username} (ID: {user.id})\n"
-                 f"Сообщение: {message_text}\n\n"
-                 f"Время: {datetime.now().strftime('%d.%m.%Y %H:%M:%S')}"
+            text=f"🛠 НОВОЕ ОБРАЩЕНИЕ\n\n"
+                 f"👤 @{user.username}\n"
+                 f"🆔 {user.id}\n\n"
+                 f"💬 {message_text}\n\n"
+                 f"Ответить:\n"
+                 f"/reply {user.id} "
         )
         
         await update.message.reply_text(
@@ -259,6 +255,40 @@ async def handle_tech_message(update, context):
         await update.message.reply_text("Ошибка при отправке сообщения")
     
     context.user_data['awaiting_tech'] = False
+
+async def reply_user(update, context):
+    if update.effective_user.id != ADMIN_CHAT_ID:
+        return
+
+    if len(context.args) < 2:
+        await update.message.reply_text(
+            "Использование:\n/reply USER_ID сообщение"
+        )
+        return
+
+    try:
+        user_id = int(context.args[0])
+        message = " ".join(context.args[1:])
+
+        await context.bot.send_message(
+            chat_id=user_id,
+            text=f"📩 Ответ поддержки\n\n{message}"
+        )
+
+        await update.message.reply_text("✅ Ответ отправлен")
+
+    except Exception as e:
+        logger.error(f"Reply error: {e}")
+        await update.message.reply_text("Ошибка отправки")
+
+async def handle_text(update, context):
+    if context.user_data.get("awaiting_key"):
+        await handle_key_input(update, context)
+        return
+
+    if context.user_data.get("awaiting_tech"):
+        await handle_tech_message(update, context)
+        return
 
 async def check(update, context):
     response = requests.get(f"{SUPABASE_URL}/rest/v1/products?select=*", headers=SUPABASE_HEADERS)
@@ -282,16 +312,19 @@ async def check(update, context):
 def main():
     application = Application.builder().token(TOKEN).build()
     
+    # Команды
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("list", list_products))
     application.add_handler(CommandHandler("redeem", redeem_key))
     application.add_handler(CommandHandler("tech", tech_support))
     application.add_handler(CommandHandler("check", check))
+    application.add_handler(CommandHandler("reply", reply_user))
     
+    # Обработчики
     application.add_handler(CallbackQueryHandler(product_callback, pattern="^buy_"))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_key_input))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_tech_message))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     
+    # Платежи
     application.add_handler(PreCheckoutQueryHandler(pre_checkout_query))
     application.add_handler(MessageHandler(filters.SUCCESSFUL_PAYMENT, successful_payment))
     
