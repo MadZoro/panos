@@ -3,8 +3,16 @@ import asyncio
 import logging
 from datetime import datetime
 from dotenv import load_dotenv
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, LabeledPrice
+from telegram.ext import (
+    Application, 
+    CommandHandler, 
+    MessageHandler, 
+    CallbackQueryHandler, 
+    PreCheckoutQueryHandler,
+    filters, 
+    ContextTypes
+)
 from supabase import create_client, Client
 
 # Загрузка переменных окружения
@@ -20,15 +28,23 @@ SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 ADMIN_CHAT_ID = 1180120574
 
-# Инициализация Supabase
-supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+# Проверка наличия переменных
+if not all([TOKEN, SUPABASE_URL, SUPABASE_KEY]):
+    logger.error("❌ Ошибка: не все переменные окружения заданы!")
+    exit(1)
 
-# Функция получения IP пользователя (приблизительно через Telegram)
+# Инициализация Supabase
+try:
+    supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+    logger.info("✅ Supabase подключен")
+except Exception as e:
+    logger.error(f"❌ Ошибка подключения к Supabase: {e}")
+    exit(1)
+
+# Функция получения IP пользователя
 async def get_user_ip(update: Update) -> str:
-    """Получение IP пользователя (если доступно)"""
+    """Получение IP пользователя"""
     try:
-        # В Telegram нет прямого доступа к IP, используем заглушку
-        # Можно добавить через вебхук или сервис
         return f"telegram_{update.effective_user.id}"
     except:
         return "unknown"
@@ -37,19 +53,18 @@ async def get_user_ip(update: Update) -> str:
 async def register_user(user_id: int, username: str, ip: str):
     """Регистрирует пользователя если его нет в БД"""
     try:
-        # Проверяем существует ли пользователь
         existing = supabase.table("users").select("*").eq("user_id", user_id).execute()
         
         if not existing.data:
-            # Создаем нового пользователя
             supabase.table("users").insert({
                 "user_id": user_id,
-                "username": username,
-                "ip_address": ip
+                "username": username or "no_username",
+                "ip_address": ip,
+                "registered_at": datetime.now().isoformat()
             }).execute()
-            logger.info(f"Новый пользователь: {user_id} ({username})")
+            logger.info(f"✅ Новый пользователь: {user_id} ({username})")
     except Exception as e:
-        logger.error(f"Ошибка регистрации: {e}")
+        logger.error(f"❌ Ошибка регистрации: {e}")
 
 # Команда /start
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -74,7 +89,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # Команда /list - вывод товаров кнопками
 async def list_products(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
-        # Получаем товары из БД
         products = supabase.table("products").select("*").execute()
         
         if not products.data:
@@ -96,7 +110,7 @@ async def list_products(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="Markdown"
         )
     except Exception as e:
-        logger.error(f"Ошибка в /list: {e}")
+        logger.error(f"❌ Ошибка в /list: {e}")
         await update.message.reply_text("❌ Ошибка загрузки товаров")
 
 # Обработка нажатия на товар
@@ -106,69 +120,69 @@ async def product_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     product_id = int(query.data.split("_")[1])
     
-    # Получаем товар из БД
-    product = supabase.table("products").select("*").eq("id", product_id).execute()
-    
-    if not product.data:
-        await query.edit_message_text("❌ Товар не найден")
-        return
-    
-    product = product.data[0]
-    
-    # Создаем инвойс для оплаты звездами
-    await query.edit_message_text(
-        f"💎 *Оплата товара:* {product['name']}\n"
-        f"💰 Цена: {product['price']} ⭐\n\n"
-        f"Для оплаты нажмите кнопку ниже:",
-        parse_mode="Markdown"
-    )
-    
-    # Отправляем счет на оплату звездами
-    await context.bot.send_invoice(
-        chat_id=update.effective_chat.id,
-        title=f"Покупка {product['name']}",
-        description=f"Приобретение лицензии на {product['name']}",
-        payload=f"payment_{product_id}",
-        provider_token="",  # Для звезд оставляем пустым
-        currency="XTR",  # XTR = Telegram Stars
-        prices=[{"label": product['name'], "amount": product['price']}],
-        need_name=False,
-        need_phone_number=False,
-        need_email=False
-    )
+    try:
+        product = supabase.table("products").select("*").eq("id", product_id).execute()
+        
+        if not product.data:
+            await query.edit_message_text("❌ Товар не найден")
+            return
+        
+        product = product.data[0]
+        
+        # Отправляем счет на оплату звездами
+        await context.bot.send_invoice(
+            chat_id=update.effective_chat.id,
+            title=f"Покупка {product['name']}",
+            description=f"Приобретение лицензии на {product['name']}",
+            payload=f"payment_{product_id}",
+            provider_token="",
+            currency="XTR",
+            prices=[LabeledPrice(label=product['name'], amount=product['price'])],
+            need_name=False,
+            need_phone_number=False,
+            need_email=False
+        )
+    except Exception as e:
+        logger.error(f"❌ Ошибка при оплате: {e}")
+        await query.edit_message_text("❌ Ошибка при создании платежа")
 
-# Обработка успешной оплаты
+# Обработка предпроверки платежа
 async def pre_checkout_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.pre_checkout_query
     await query.answer(ok=True)
 
+# Обработка успешной оплаты
 async def successful_payment(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     payment = update.message.successful_payment
     product_id = int(payment.invoice_payload.split("_")[1])
     
-    # Получаем товар
-    product = supabase.table("products").select("*").eq("id", product_id).execute()
-    
-    if product.data:
-        product = product.data[0]
-        # Отправляем ссылку на товар
-        await update.message.reply_text(
-            f"✅ *Оплата прошла успешно!*\n\n"
-            f"🎁 Ваш товар: *{product['name']}*\n"
-            f"🔗 Ссылка для скачивания:\n`{product['download_link']}`\n\n"
-            f"Спасибо за покупку!",
-            parse_mode="Markdown"
-        )
+    try:
+        product = supabase.table("products").select("*").eq("id", product_id).execute()
         
-        # Логируем покупку в админ-чат
-        await context.bot.send_message(
-            ADMIN_CHAT_ID,
-            f"💰 Новая покупка!\n"
-            f"Пользователь: @{user.username} ({user.id})\n"
-            f"Товар: {product['name']}\n"
-            f"Сумма: {payment.total_amount} ⭐"
-        )
+        if product.data:
+            product = product.data[0]
+            
+            await update.message.reply_text(
+                f"✅ *Оплата прошла успешно!*\n\n"
+                f"🎁 Ваш товар: *{product['name']}*\n"
+                f"🔗 Ссылка для скачивания:\n`{product['download_link']}`\n\n"
+                f"💾 Сохраните ссылку, она действительна 24 часа.\n"
+                f"Спасибо за покупку!",
+                parse_mode="Markdown"
+            )
+            
+            await context.bot.send_message(
+                ADMIN_CHAT_ID,
+                f"💰 *Новая покупка!*\n"
+                f"👤 Пользователь: @{user.username} ({user.id})\n"
+                f"📦 Товар: {product['name']}\n"
+                f"⭐ Сумма: {payment.total_amount} звезд",
+                parse_mode="Markdown"
+            )
+    except Exception as e:
+        logger.error(f"❌ Ошибка при обработке оплаты: {e}")
+        await update.message.reply_text("❌ Ошибка при обработке платежа")
 
 # Команда /redeem - активация ключа
 async def redeem_key(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -177,7 +191,6 @@ async def redeem_key(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Введите ваш ключ активации:",
         parse_mode="Markdown"
     )
-    # Устанавливаем состояние ожидания ключа
     context.user_data['awaiting_key'] = True
 
 # Обработка ввода ключа
@@ -188,7 +201,6 @@ async def handle_key_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
     key = update.message.text.strip().upper()
     user_id = update.effective_user.id
     
-    # Ищем ключ в БД
     try:
         key_data = supabase.table("redeem_keys").select("*").eq("key_code", key).execute()
         
@@ -199,13 +211,11 @@ async def handle_key_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         key_info = key_data.data[0]
         
-        # Проверяем использован ли ключ
         if key_info['is_used']:
             await update.message.reply_text("❌ Этот ключ уже был использован")
             context.user_data['awaiting_key'] = False
             return
         
-        # Проверяем не активировал ли пользователь уже этот товар
         existing = supabase.table("activations").select("*").eq("user_id", user_id).eq("product_id", key_info['product_id']).execute()
         
         if existing.data:
@@ -213,26 +223,26 @@ async def handle_key_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
             context.user_data['awaiting_key'] = False
             return
         
-        # Активируем ключ
         supabase.table("redeem_keys").update({
             "is_used": True,
-            "used_by": user_id
+            "used_by": user_id,
+            "used_at": datetime.now().isoformat()
         }).eq("key_code", key).execute()
         
-        # Добавляем в активации
         supabase.table("activations").insert({
             "user_id": user_id,
-            "product_id": key_info['product_id']
+            "product_id": key_info['product_id'],
+            "activated_at": datetime.now().isoformat()
         }).execute()
         
-        # Получаем ссылку на товар
         product = supabase.table("products").select("*").eq("id", key_info['product_id']).execute()
         
         if product.data:
             await update.message.reply_text(
                 f"✅ *Ключ успешно активирован!*\n\n"
                 f"🎁 Ваш товар: *{product.data[0]['name']}*\n"
-                f"🔗 Ссылка:\n`{product.data[0]['download_link']}`",
+                f"🔗 Ссылка:\n`{product.data[0]['download_link']}`\n\n"
+                f"💾 Сохраните ссылку, она действительна 24 часа.",
                 parse_mode="Markdown"
             )
         else:
@@ -241,7 +251,7 @@ async def handle_key_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data['awaiting_key'] = False
         
     except Exception as e:
-        logger.error(f"Ошибка активации ключа: {e}")
+        logger.error(f"❌ Ошибка активации ключа: {e}")
         await update.message.reply_text("❌ Ошибка активации")
 
 # Команда /tech - техподдержка
@@ -262,7 +272,6 @@ async def handle_tech_message(update: Update, context: ContextTypes.DEFAULT_TYPE
     user = update.effective_user
     message_text = update.message.text
     
-    # Отправляем админу
     await context.bot.send_message(
         ADMIN_CHAT_ID,
         f"🛠 *Новое обращение в ТП*\n"
@@ -278,16 +287,7 @@ async def handle_tech_message(update: Update, context: ContextTypes.DEFAULT_TYPE
     
     context.user_data['awaiting_tech'] = False
 
-# Команда для обновления товаров (для админа)
-async def admin_update_products(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ADMIN_CHAT_ID:
-        await update.message.reply_text("❌ Нет доступа")
-        return
-    
-    await update.message.reply_text("✅ Бот обновит список товаров при следующем /list")
-
 async def main():
-    # Создаем приложение
     application = Application.builder().token(TOKEN).build()
     
     # Команды
@@ -301,13 +301,12 @@ async def main():
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_key_input))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_tech_message))
     
-    # Оплата
-    application.add_handler(MessageHandler(filters.SUCCESSFUL_PAYMENT, successful_payment))
+    # Платежи
     application.add_handler(PreCheckoutQueryHandler(pre_checkout_query))
+    application.add_handler(MessageHandler(filters.SUCCESSFUL_PAYMENT, successful_payment))
     
-    # Запуск
+    logger.info("🚀 Бот запущен и готов к работе!")
     await application.run_polling()
 
 if __name__ == "__main__":
-    from telegram.ext import PreCheckoutQueryHandler
     asyncio.run(main())
