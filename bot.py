@@ -27,11 +27,11 @@ ADMIN_CHAT_ID = 1180120574
 
 # Проверка переменных
 if not all([TOKEN, SUPABASE_URL, SUPABASE_KEY]):
-    logger.error("❌ Ошибка: не все переменные окружения заданы!")
+    logger.error("Ошибка: не все переменные окружения заданы!")
     exit(1)
 
-logger.info(f"✅ Бот запущен")
-logger.info(f"👨‍💼 Admin ID: {ADMIN_CHAT_ID}")
+logger.info(f"Бот запущен")
+logger.info(f"Admin ID: {ADMIN_CHAT_ID}")
 
 # Headers для Supabase
 SUPABASE_HEADERS = {
@@ -40,7 +40,7 @@ SUPABASE_HEADERS = {
     "Content-Type": "application/json"
 }
 
-def supabase_request(method: str, table: str, params: dict = None, data: dict = None):
+def supabase_request(method, table, params=None, data=None):
     url = f"{SUPABASE_URL}/rest/v1/{table}"
     try:
         if method == "get":
@@ -51,16 +51,19 @@ def supabase_request(method: str, table: str, params: dict = None, data: dict = 
             response = requests.patch(url, headers=SUPABASE_HEADERS, params=params, json=data)
         else:
             return None
-        return response.json() if response.status_code < 400 else None
+        
+        if response.status_code >= 400:
+            logger.error(f"Supabase error {response.status_code}: {response.text}")
+            return None
+        
+        return response.json()
     except Exception as e:
-        logger.error(f"❌ Request error: {e}")
+        logger.error(f"Request error: {e}")
         return None
 
-# Команда /start
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def start(update, context):
     user = update.effective_user
     
-    # Регистрация пользователя
     existing = supabase_request("get", "users", params={"user_id": f"eq.{user.id}"})
     if not existing:
         supabase_request("post", "users", data={
@@ -69,92 +72,105 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "ip_address": f"telegram_{user.id}",
             "registered_at": datetime.now().isoformat()
         })
-        logger.info(f"✅ Новый пользователь: {user.id} (@{user.username})")
+        logger.info(f"Новый пользователь: {user.id}")
     
-    welcome_text = f"""
-╔══════════════════════════════════════╗
-║                                      ║
-║     🔥 *ДОБРО ПОЖАЛОВАТЬ В* 🔥       ║
-║     🛡️ *H A C K . N E T* 🛡️         ║
-║                                      ║
-║   *Ваш надёжный магазин*             ║
-║   *программного обеспечения*         ║
-║                                      ║
-╚══════════════════════════════════════╝
+    welcome_text = """
+🔥 ДОБРО ПОЖАЛОВАТЬ В HACK.NET 🔥
 
-▫️▫️▫️▫️▫️▫️▫️▫️▫️▫️▫️▫️▫️▫️▫️▫️▫️▫️▫️▫️▫️▫️
+Ваш надёжный магазин программного обеспечения.
 
-📋 *Доступные команды:*
+Доступные команды:
+/list - Список товаров
+/redeem - Активировать ключ
+/tech - Техническая поддержка
 
-🔹 `/list` - 📦 Список товаров
-🔹 `/redeem` - 🎫 Активировать ключ  
-🔹 `/tech` - 🛠️ Техническая поддержка
-
-▫️▫️▫️▫️▫️▫️▫️▫️▫️▫️▫️▫️▫️▫️▫️▫️▫️▫️▫️▫️▫️▫️
-
-💎 *Приобретайте только качественное ПО!*
+Приобретайте только качественное ПО!
 """
-    await update.message.reply_text(welcome_text, parse_mode="Markdown")
+    await update.message.reply_text(welcome_text)
 
-# Команда /list
-async def list_products(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def list_products(update, context):
     try:
         products = supabase_request("get", "products")
         
         if not products:
-            await update.message.reply_text(
-                "❌ *В каталоге пока нет товаров*\n\n"
-                "Загляните позже! 🔄",
-                parse_mode="Markdown"
-            )
+            await update.message.reply_text("В каталоге пока нет товаров")
             return
         
         keyboard = []
         for product in products:
             button = InlineKeyboardButton(
-                f"📦 {product['name']} — {product['price']} ⭐",
+                f"{product['name']} - {product['price']} звезд",
                 callback_data=f"buy_{product['id']}"
             )
             keyboard.append([button])
         
-        text = f"""
-╔════════════════════════════╗
-║      🛒 *КАТАЛОГ ТОВАРОВ*     ║
-║      📦 *HACK.NET STORE*      ║
-╚════════════════════════════╝
-
-▫️▫️▫️▫️▫️▫️▫️▫️▫️▫️▫️▫️▫️▫️▫️▫️▫️▫️▫️▫️
-
-📌 *Всего товаров:* {len(products)} шт.
-
-🎯 *Выберите товар для покупки:*
-"""
+        reply_markup = InlineKeyboardMarkup(keyboard)
         await update.message.reply_text(
-            text,
-            reply_markup=InlineKeyboardMarkup(keyboard),
-            parse_mode="Markdown"
+            f"Каталог товаров ({len(products)} шт.):",
+            reply_markup=reply_markup
         )
     except Exception as e:
-        logger.error(f"❌ Ошибка в /list: {e}")
-        await update.message.reply_text("❌ *Ошибка загрузки товаров*", parse_mode="Markdown")
+        logger.error(f"Ошибка в /list: {e}")
+        await update.message.reply_text("Ошибка загрузки товаров")
 
-# Команда /redeem
-async def redeem_key(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = """
-╔═══════════════════════════╗
-║     🎫 *АКТИВАЦИЯ КЛЮЧА*     ║
-║     🔑 *HACK.NET*            ║
-╚═══════════════════════════╝
+async def product_callback(update, context):
+    query = update.callback_query
+    await query.answer()
+    
+    product_id = int(query.data.split("_")[1])
+    product_data = supabase_request("get", "products", params={"id": f"eq.{product_id}"})
+    
+    if not product_data:
+        await query.edit_message_text("Товар не найден")
+        return
+    
+    product = product_data[0]
+    
+    await context.bot.send_invoice(
+        chat_id=update.effective_chat.id,
+        title=f"Покупка {product['name']}",
+        description=f"Приобретение лицензии на {product['name']}",
+        payload=f"payment_{product_id}",
+        provider_token="",
+        currency="XTR",
+        prices=[LabeledPrice(label=product['name'], amount=product['price'])],
+        need_name=False,
+        need_phone_number=False,
+        need_email=False
+    )
 
-▫️▫️▫️▫️▫️▫️▫️▫️▫️▫️▫️▫️▫️▫️▫️▫️
+async def pre_checkout_query(update, context):
+    await update.pre_checkout_query.answer(ok=True)
 
-📝 *Введите ваш ключ активации:*
-"""
-    await update.message.reply_text(text, parse_mode="Markdown")
+async def successful_payment(update, context):
+    user = update.effective_user
+    payment = update.message.successful_payment
+    product_id = int(payment.invoice_payload.split("_")[1])
+    
+    product_data = supabase_request("get", "products", params={"id": f"eq.{product_id}"})
+    
+    if product_data:
+        product = product_data[0]
+        await update.message.reply_text(
+            f"Оплата прошла успешно!\n\n"
+            f"Ваш товар: {product['name']}\n"
+            f"Ссылка для скачивания: {product['download_link']}\n\n"
+            f"Спасибо за покупку!"
+        )
+        
+        await context.bot.send_message(
+            ADMIN_CHAT_ID,
+            f"Новая покупка!\n"
+            f"Пользователь: @{user.username} ({user.id})\n"
+            f"Товар: {product['name']}\n"
+            f"Сумма: {payment.total_amount} звезд"
+        )
+
+async def redeem_key(update, context):
+    await update.message.reply_text("Введите ваш ключ активации:")
     context.user_data['awaiting_key'] = True
 
-# Обработка ввода ключа
-async def handle_key_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def handle_key_input(update, context):
     if not context.user_data.get('awaiting_key'):
         return
     
@@ -164,14 +180,14 @@ async def handle_key_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
     key_data = supabase_request("get", "redeem_keys", params={"key_code": f"eq.{key}"})
     
     if not key_data:
-        await update.message.reply_text("❌ *Неверный ключ активации*", parse_mode="Markdown")
+        await update.message.reply_text("Неверный ключ активации")
         context.user_data['awaiting_key'] = False
         return
     
     key_info = key_data[0]
     
     if key_info.get('is_used'):
-        await update.message.reply_text("❌ *Этот ключ уже был использован*", parse_mode="Markdown")
+        await update.message.reply_text("Этот ключ уже был использован")
         context.user_data['awaiting_key'] = False
         return
     
@@ -181,7 +197,7 @@ async def handle_key_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
     })
     
     if existing:
-        await update.message.reply_text("❌ *Вы уже активировали этот товар ранее*", parse_mode="Markdown")
+        await update.message.reply_text("Вы уже активировали этот товар ранее")
         context.user_data['awaiting_key'] = False
         return
     
@@ -200,221 +216,69 @@ async def handle_key_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     if product_data:
         product = product_data[0]
-        success_text = f"""
-╔═══════════════════════════╗
-║    ✅ *КЛЮЧ АКТИВИРОВАН*     ║
-║    🎉 *HACK.NET*            ║
-╚═══════════════════════════╝
-
-▫️▫️▫️▫️▫️▫️▫️▫️▫️▫️▫️▫️▫️▫️▫️▫️
-
-🎁 *Товар:* {product['name']}
-
-🔗 *Ссылка для скачивания:*
-`{product['download_link']}`
-
-💾 *Сохраните ссылку!*
-
-🙏 *Спасибо за покупку в HACK.NET!*
-"""
-        await update.message.reply_text(success_text, parse_mode="Markdown")
+        await update.message.reply_text(
+            f"Ключ успешно активирован!\n\n"
+            f"Ваш товар: {product['name']}\n"
+            f"Ссылка: {product['download_link']}"
+        )
     else:
-        await update.message.reply_text("✅ *Ключ активирован!*", parse_mode="Markdown")
+        await update.message.reply_text("Ключ активирован!")
     
     context.user_data['awaiting_key'] = False
 
-# Команда /tech
-async def tech_support(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = """
-╔═══════════════════════════╗
-║   🛠️ *ТЕХНИЧЕСКАЯ ПОДДЕРЖКА* ║
-║   💬 *HACK.NET HELP*         ║
-╚═══════════════════════════╝
-
-▫️▫️▫️▫️▫️▫️▫️▫️▫️▫️▫️▫️▫️▫️▫️▫️
-
-📝 *Опишите вашу проблему*
-
-✏️ *Отправьте одним сообщением*
-
-────────────────────────────
-
-⏳ *Ожидайте ответа администратора*
-
-💡 *Напишите как можно подробнее:*
-• Что вы хотели купить?
-• Какая ошибка возникла?
-• Скриншот (если есть)
-"""
-    await update.message.reply_text(text, parse_mode="Markdown")
+async def tech_support(update, context):
+    await update.message.reply_text(
+        "Техническая поддержка\n\n"
+        "Опишите вашу проблему одним сообщением.\n"
+        "Я передам её администратору."
+    )
     context.user_data['awaiting_tech'] = True
-    logger.info(f"📝 Пользователь {update.effective_user.id} начал обращение в ТП")
 
-# Обработка сообщения в техподдержку
-async def handle_tech_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def handle_tech_message(update, context):
     if not context.user_data.get('awaiting_tech'):
         return
     
     user = update.effective_user
     message_text = update.message.text
     
-    logger.info(f"📨 Получено сообщение в ТП от @{user.username}")
-    
     try:
         await context.bot.send_message(
             chat_id=ADMIN_CHAT_ID,
-            text=f"""
-🛠️ *НОВОЕ ОБРАЩЕНИЕ В ТП* 
-🏪 *HACK.NET*
-
-━━━━━━━━━━━━━━━━━━━━━━
-
-👤 *Пользователь:* @{user.username}
-🆔 *ID:* `{user.id}`
-👣 *Имя:* {user.first_name or "Не указано"}
-
-━━━━━━━━━━━━━━━━━━━━━━
-
-📝 *Сообщение:*
-{message_text}
-
-━━━━━━━━━━━━━━━━━━━━━━
-
-🕐 *Время:* {datetime.now().strftime('%d.%m.%Y %H:%M:%S')}
-
-💡 *Ответьте в этот чат, бот перешлёт пользователю*
-""",
-            parse_mode="Markdown"
+            text=f"НОВОЕ ОБРАЩЕНИЕ В ТП\n\n"
+                 f"Пользователь: @{user.username} (ID: {user.id})\n"
+                 f"Сообщение: {message_text}\n\n"
+                 f"Время: {datetime.now().strftime('%d.%m.%Y %H:%M:%S')}"
         )
-        logger.info(f"✅ Сообщение отправлено админу {ADMIN_CHAT_ID}")
         
-        confirm_text = """
-╔═══════════════════════════╗
-║   ✅ *СООБЩЕНИЕ ОТПРАВЛЕНО*  ║
-║   📬 *HACK.NET SUPPORT*      ║
-╚═══════════════════════════╝
-
-▫️▫️▫️▫️▫️▫️▫️▫️▫️▫️▫️▫️▫️▫️▫️▫️
-
-👨‍💻 *Администратор свяжется с вами*
-
-⏳ *Ожидайте ответа в ближайшее время*
-
-────────────────────────────
-
-🙏 *Спасибо за обращение в HACK.NET!*
-"""
-        await update.message.reply_text(confirm_text, parse_mode="Markdown")
-        
-    except Exception as e:
-        logger.error(f"❌ Ошибка при отправке админу: {e}")
         await update.message.reply_text(
-            "❌ *Ошибка при отправке сообщения*\n\n"
-            "Попробуйте позже или свяжитесь напрямую: @hacknet_support",
-            parse_mode="Markdown"
+            "Сообщение отправлено администратору!\n"
+            "Ответ придет в ближайшее время."
         )
+    except Exception as e:
+        logger.error(f"Ошибка при отправке админу: {e}")
+        await update.message.reply_text("Ошибка при отправке сообщения")
     
     context.user_data['awaiting_tech'] = False
 
-# Обработка покупки товара
-async def product_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
+async def check(update, context):
+    response = requests.get(f"{SUPABASE_URL}/rest/v1/products?select=*", headers=SUPABASE_HEADERS)
     
-    product_id = int(query.data.split("_")[1])
-    product_data = supabase_request("get", "products", params={"id": f"eq.{product_id}"})
-    
-    if not product_data:
-        await query.edit_message_text("❌ *Товар не найден*", parse_mode="Markdown")
-        return
-    
-    product = product_data[0]
-    
-    await context.bot.send_invoice(
-        chat_id=update.effective_chat.id,
-        title=f"Покупка в HACK.NET",
-        description=f"{product['name']} - лицензия",
-        payload=f"payment_{product_id}",
-        provider_token="",
-        currency="XTR",
-        prices=[LabeledPrice(label=product['name'], amount=product['price'])],
-        need_name=False,
-        need_phone_number=False,
-        need_email=False
-    )
-
-async def pre_checkout_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.pre_checkout_query.answer(ok=True)
-
-async def successful_payment(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = update.effective_user
-    payment = update.message.successful_payment
-    product_id = int(payment.invoice_payload.split("_")[1])
-    
-    product_data = supabase_request("get", "products", params={"id": f"eq.{product_id}"})
-    
-    if product_data:
-        product = product_data[0]
-        
-        success_text = f"""
-╔════════════════════════════╗
-║     ✅ *ОПЛАТА ПРОШЛА*       ║
-║     ✅ *УСПЕШНО!*            ║
-║     🏪 *HACK.NET*            ║
-╚════════════════════════════╝
-
-▫️▫️▫️▫️▫️▫️▫️▫️▫️▫️▫️▫️▫️▫️▫️▫️
-
-🎁 *Ваш товар:* {product['name']}
-
-🔗 *Ссылка для скачивания:*
-`{product['download_link']}`
-
-💾 *Сохраните ссылку!*
-
-────────────────────────────
-
-🙏 *Спасибо за покупку в HACK.NET!*
-"""
-        await update.message.reply_text(success_text, parse_mode="Markdown")
-        
-        await context.bot.send_message(
-            ADMIN_CHAT_ID,
-            f"💰 *НОВАЯ ПОКУПКА!*\n"
-            f"🏪 *HACK.NET*\n\n"
-            f"👤 *Пользователь:* @{user.username} ({user.id})\n"
-            f"📦 *Товар:* {product['name']}\n"
-            f"⭐ *Сумма:* {payment.total_amount} звезд",
-            parse_mode="Markdown"
+    if response.status_code == 200:
+        products = response.json()
+        await update.message.reply_text(
+            f"Диагностика:\n\n"
+            f"Статус: Работает\n"
+            f"Товаров в БД: {len(products)} шт.\n"
+            f"Admin ID: {ADMIN_CHAT_ID}\n"
+            f"Твой ID: {update.effective_user.id}"
+        )
+    else:
+        await update.message.reply_text(
+            f"Ошибка подключения к Supabase\n"
+            f"Статус: {response.status_code}\n"
+            f"Ответ: {response.text[:200]}"
         )
 
-# Диагностическая команда
-async def check(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    
-    products = supabase_request("get", "products")
-    products_count = len(products) if products else 0
-    
-    info = f"""
-╔════════════════════════════╗
-║     📊 *ДИАГНОСТИКА*         ║
-║     🏪 *HACK.NET*            ║
-╚════════════════════════════╝
-
-👤 *Ваш ID:* `{user_id}`
-👨‍💼 *Admin ID:* `{ADMIN_CHAT_ID}`
-
-📦 *Товаров в БД:* {products_count} шт.
-
-🔄 *Статус:* {'✅ Работает' if products is not None else '❌ Ошибка'}
-
-💡 *Если товаров 0, проверьте:*
-• Есть ли данные в таблице 'products'
-• RLS политики Supabase
-"""
-    await update.message.reply_text(info, parse_mode="Markdown")
-
-# ЗАПУСК
 def main():
     application = Application.builder().token(TOKEN).build()
     
@@ -431,7 +295,7 @@ def main():
     application.add_handler(PreCheckoutQueryHandler(pre_checkout_query))
     application.add_handler(MessageHandler(filters.SUCCESSFUL_PAYMENT, successful_payment))
     
-    logger.info("🚀 HACK.NET бот запущен!")
+    logger.info("Бот запущен!")
     application.run_polling()
 
 if __name__ == "__main__":
