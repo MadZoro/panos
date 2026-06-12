@@ -362,7 +362,9 @@ async def check_chat_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode="Markdown"
     )
 
-async def main():
+# ========== ГЛАВНЫЙ ЗАПУСК - ИСПРАВЛЕННЫЙ ==========
+def main():
+    """Запуск бота без проблем с event loop"""
     application = Application.builder().token(TOKEN).build()
     
     application.add_handler(CommandHandler("start", start))
@@ -381,7 +383,8 @@ async def main():
     logger.info("🚀 Бот успешно запущен!")
     logger.info(f"👨‍💼 Администратор: {ADMIN_CHAT_ID}")
     
-    await application.run_polling()
+    # ЗАПУСКАЕМ НАПРЯМУЮ БЕЗ asyncio.run()
+    application.run_polling()
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()  # Вместо asyncio.run(main())
