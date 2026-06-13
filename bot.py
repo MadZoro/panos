@@ -212,18 +212,23 @@ async def handle_key_input(update, context):
     key = update.message.text.strip().upper()
     user_id = update.effective_user.id
     
+    logger.info(f"DEBUG: Попытка активации ключа '{key}' пользователем {user_id}")
+
     # Ищем ключ в таблице user_keys
+    # Важно: убедись, что в Supabase колонка key_code именно так называется
     key_data = supabase_request("get", "user_keys", params={"key_code": f"eq.{key}"})
     
+    logger.info(f"DEBUG: Результат запроса к БД: {key_data}")
+    
     if not key_data:
-        await update.message.reply_text("❌ *Неверный ключ активации*", parse_mode="Markdown")
+        await update.message.reply_text("❌ *Неверный ключ активации (не найден в базе)*", parse_mode="Markdown")
         context.user_data['awaiting_key'] = False
         return
     
     key_info = key_data[0]
     
     # Проверяем принадлежит ли ключ этому пользователю
-    if key_info['user_id'] != user_id:
+    if int(key_info['user_id']) != int(user_id):
         await update.message.reply_text("❌ *Этот ключ не принадлежит вам*", parse_mode="Markdown")
         context.user_data['awaiting_key'] = False
         return
@@ -240,7 +245,7 @@ async def handle_key_input(update, context):
     if product_data:
         product = product_data[0]
         
-        # Активируем ключ в БД
+        # Активируем ключ
         supabase_request("patch", "user_keys",
             params={"key_code": f"eq.{key}"},
             data={"is_activated": True, "activated_at": datetime.now().isoformat()}
@@ -249,8 +254,7 @@ async def handle_key_input(update, context):
         await update.message.reply_text(
             f"✅ *Ключ успешно активирован!*\n\n"
             f"🎁 *Ваш товар:* {product['name']}\n"
-            f"🔗 *Ссылка для скачивания:*\n`{product['download_link']}`\n\n"
-            f"💾 *Сохраните ссылку!*",
+            f"🔗 *Ссылка для скачивания:*\n`{product['download_link']}`",
             parse_mode="Markdown"
         )
     else:
