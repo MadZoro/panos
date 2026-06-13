@@ -70,6 +70,12 @@ def generate_key():
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
+async def send_response(update, context, text, reply_markup=None):
+    if update.callback_query:
+        await update.callback_query.message.reply_text(text, reply_markup=reply_markup, parse_mode="Markdown")
+    else:
+        await update.message.reply_text(text, reply_markup=reply_markup, parse_mode="Markdown")
+
 async def start(update, context):
     user = update.effective_user
     
@@ -356,6 +362,22 @@ async def check(update, context):
             parse_mode="Markdown"
         )
 
+async def main_menu_callback(update, context):
+    query = update.callback_query
+    await query.answer()
+
+    if query.data == "list":
+        # Эмулируем вызов функции /list
+        await list_products(update, context)
+        
+    elif query.data == "redeem":
+        # Эмулируем вызов функции /redeem
+        await redeem_key(update, context)
+        
+    elif query.data == "tech":
+        # Эмулируем вызов функции /tech
+        await tech_support(update, context)
+
 def main():
     application = Application.builder().token(TOKEN).build()
     
@@ -366,6 +388,7 @@ def main():
     application.add_handler(CommandHandler("tech", tech_support))
     application.add_handler(CommandHandler("check", check))
     application.add_handler(CommandHandler("reply", reply_user))
+    application.add_handler(CallbackQueryHandler(main_menu_callback))
     
     # Обработчики
     application.add_handler(CallbackQueryHandler(product_callback, pattern="^buy_"))
