@@ -68,9 +68,12 @@ def generate_key():
     """Генерация случайного ключа активации"""
     return ''.join(random.choices(string.ascii_uppercase + string.digits, k=16))
 
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+
 async def start(update, context):
     user = update.effective_user
     
+    # Логика работы с Supabase
     existing = supabase_request("get", "users", params={"user_id": f"eq.{user.id}"})
     if not existing:
         supabase_request("post", "users", data={
@@ -81,17 +84,19 @@ async def start(update, context):
         })
         logger.info(f"Новый пользователь: {user.id}")
     
+    # Создаем клавиатуру
+    # switch_inline_query_current_chat вставит текст в поле ввода пользователя
     keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("📦 /list — Каталог товаров", switch_inline_query_current_chat="list")],
+        [InlineKeyboardButton("🎫 /redeem — Активировать ключ", switch_inline_query_current_chat="redeem")],
+        [InlineKeyboardButton("🛠 /tech — Поддержка", switch_inline_query_current_chat="tech")],
         [InlineKeyboardButton("🛒 ПЕРЕЙТИ В МАГАЗИН 🛒", url=SHOP_LINK)]
     ])
     
     welcome_text = (
         "🔥 **H A C K . N E T** 🔥\n\n"
-        "💎 *Элитный магазин программного обеспечения*\n\n"
-        "📋 **Доступные команды:**\n"
-        "▫️ `/list` — 📦 Каталог товаров\n"
-        "▫️ `/redeem` — 🎫 Активировать ключ\n"
-        "▫️ `/tech` — 🛠️ Техническая поддержка\n\n"
+        "💎 *Элитный магазин вредоносного программного обеспечения*\n\n"
+        "📋 **Нажмите на кнопку, чтобы вставить команду в поле ввода:**\n\n"
         "👇 **Наш официальный магазин:**"
     )
     
