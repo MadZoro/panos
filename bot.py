@@ -199,7 +199,7 @@ async def handle_key_input(update, context):
     key = update.message.text.strip().upper()
     user_id = update.effective_user.id
     
-    # Ищем ключ
+    # Ищем ключ ТОЛЬКО в redeem_keys
     key_data = supabase_request("get", "redeem_keys", params={"key_code": f"eq.{key}"})
     
     if not key_data:
@@ -209,7 +209,7 @@ async def handle_key_input(update, context):
     
     key_info = key_data[0]
     
-    # Проверяем не использован ли
+    # Проверяем использован ли
     if key_info.get('is_used'):
         await update.message.reply_text("❌ *Ключ уже использован*", parse_mode="Markdown")
         context.user_data['awaiting_key'] = False
@@ -221,14 +221,10 @@ async def handle_key_input(update, context):
     if product_data:
         product = product_data[0]
         
-        # АКТИВИРУЕМ КЛЮЧ - ЗАПОЛНЯЕМ ВСЕ ПОЛЯ
+        # Активируем
         supabase_request("patch", "redeem_keys",
             params={"key_code": f"eq.{key}"},
-            data={
-                "is_used": True, 
-                "used_at": datetime.now().isoformat(),
-                "used_by": user_id      # ← ВАЖНО!
-            }
+            data={"is_used": True, "used_at": datetime.now().isoformat()}
         )
         
         await update.message.reply_text(
@@ -237,8 +233,6 @@ async def handle_key_input(update, context):
             f"🔗 *Ссылка:* `{product['download_link']}`",
             parse_mode="Markdown"
         )
-    else:
-        await update.message.reply_text("✅ *Ключ активирован*", parse_mode="Markdown")
     
     context.user_data['awaiting_key'] = False
 
