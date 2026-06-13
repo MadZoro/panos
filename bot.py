@@ -84,20 +84,17 @@ async def start(update, context):
         })
         logger.info(f"Новый пользователь: {user.id}")
     
-    # Создаем клавиатуру
-    # switch_inline_query_current_chat вставит текст в поле ввода пользователя
     keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("📦 /list — Каталог товаров", switch_inline_query_current_chat="list")],
-        [InlineKeyboardButton("🎫 /redeem — Активировать ключ", switch_inline_query_current_chat="redeem")],
-        [InlineKeyboardButton("🛠 /tech — Поддержка", switch_inline_query_current_chat="tech")],
+        [InlineKeyboardButton("📦 Каталог товаров", callback_data="list")],
+        [InlineKeyboardButton("🎫 Активировать ключ", callback_data="redeem")],
+        [InlineKeyboardButton("🛠 Техподдержка", callback_data="tech")],
         [InlineKeyboardButton("🛒 ПЕРЕЙТИ В МАГАЗИН 🛒", url=SHOP_LINK)]
     ])
     
     welcome_text = (
         "🔥 **H A C K . N E T** 🔥\n\n"
         "💎 *Элитный магазин вредоносного программного обеспечения*\n\n"
-        "📋 **Нажмите на кнопку, чтобы вставить команду в поле ввода:**\n\n"
-        "👇 **Наш официальный магазин:**"
+        "👇 **Выберите действие:**"
     )
     
     await update.message.reply_text(welcome_text, reply_markup=keyboard, parse_mode="Markdown")
