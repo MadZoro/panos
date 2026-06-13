@@ -268,12 +268,11 @@ async def handle_key_input(update, context):
     key = update.message.text.strip().upper()
     user_id = update.effective_user.id
     
-    # ОТПРАВЛЯЕМ СООБЩЕНИЕ О НАЧАЛЕ ПРОВЕРКИ
+    # ОТПРАВЛЯЕМ СООБЩЕНИЕ О НАЧАЛЕ ПРОВЕРКИ (БЕЗ ПАРСИНГА)
     status_msg = await update.message.reply_text(
-        f"🔍 *Проверяю ключ:* `{key}`\n"
-        f"👤 *Ваш ID:* `{user_id}`\n\n"
-        f"⏳ Идет поиск в базе данных...",
-        parse_mode="Markdown"
+        f"🔍 ПРОВЕРЯЮ КЛЮЧ: {key}\n"
+        f"👤 ВАШ ID: {user_id}\n\n"
+        f"⏳ ИДЕТ ПОИСК В БАЗЕ ДАННЫХ..."
     )
     
     # 1. ПРОВЕРЯЕМ СУЩЕСТВУЕТ ЛИ ТАБЛИЦА redeem_keys
@@ -283,25 +282,22 @@ async def handle_key_input(update, context):
         
         if test_response.status_code != 200:
             await status_msg.edit_text(
-                f"❌ *КРИТИЧЕСКАЯ ОШИБКА!*\n\n"
-                f"📊 *Таблица redeem_keys не доступна*\n"
-                f"📡 *Статус:* {test_response.status_code}\n"
-                f"📝 *Ответ сервера:*\n```\n{test_response.text[:300]}\n```\n\n"
-                f"👨‍💻 *Сообщите администратору:*\n"
-                f"Таблица 'redeem_keys' не существует или нет прав доступа!",
-                parse_mode="Markdown"
+                f"❌ КРИТИЧЕСКАЯ ОШИБКА!\n\n"
+                f"📊 Таблица redeem_keys не доступна\n"
+                f"📡 Статус: {test_response.status_code}\n"
+                f"📝 Ответ сервера:\n{test_response.text[:300]}\n\n"
+                f"👨‍💻 Сообщите администратору:\n"
+                f"Таблица 'redeem_keys' не существует или нет прав доступа!"
             )
             context.user_data['awaiting_key'] = False
             return
     except Exception as e:
         await status_msg.edit_text(
-            f"❌ *НЕВОЗМОЖНО ПОДКЛЮЧИТЬСЯ К БАЗЕ!*\n\n"
-            f"🔥 *Ошибка:* `{str(e)}`\n\n"
-            f"🔧 *Проверьте:*\n"
+            f"❌ НЕВОЗМОЖНО ПОДКЛЮЧИТЬСЯ К БАЗЕ!\n\n"
+            f"🔥 Ошибка: {str(e)}\n\n"
+            f"🔧 Проверьте:\n"
             f"• SUPABASE_URL: {SUPABASE_URL}\n"
-            f"• Интернет соединение\n"
-            f"• Брандмауэр",
-            parse_mode="Markdown"
+            f"• Интернет соединение"
         )
         context.user_data['awaiting_key'] = False
         return
@@ -312,36 +308,31 @@ async def handle_key_input(update, context):
         search_params = {"key_code": f"eq.{key}"}
         
         await status_msg.edit_text(
-            f"🔍 *Ищу ключ...*\n"
-            f"📡 *Запрос:* `{search_url}?key_code=eq.{key}`\n\n"
-            f"⏳ Ожидание ответа...",
-            parse_mode="Markdown"
+            f"🔍 ИЩУ КЛЮЧ: {key}\n"
+            f"📡 ЗАПРОС К БАЗЕ...\n"
+            f"⏳ ОЖИДАНИЕ ОТВЕТА..."
         )
         
         search_response = requests.get(search_url, headers=SUPABASE_HEADERS, params=search_params)
         
-        # ВЫВОДИМ ДЕТАЛИ ЗАПРОСА
         if search_response.status_code != 200:
             await status_msg.edit_text(
-                f"❌ *ОШИБКА ПОИСКА КЛЮЧА!*\n\n"
-                f"📡 *HTTP статус:* `{search_response.status_code}`\n"
-                f"📝 *Ответ Supabase:*\n```\n{search_response.text[:500]}\n```\n\n"
-                f"🔑 *Ваш ключ:* `{key}`\n"
-                f"👤 *Ваш ID:* `{user_id}`\n\n"
-                f"💡 *Возможные причины:*\n"
+                f"❌ ОШИБКА ПОИСКА КЛЮЧА!\n\n"
+                f"📡 HTTP СТАТУС: {search_response.status_code}\n"
+                f"📝 ОТВЕТ SUPABASE:\n{search_response.text[:500]}\n\n"
+                f"🔑 ВАШ КЛЮЧ: {key}\n"
+                f"👤 ВАШ ID: {user_id}\n\n"
+                f"💡 Возможные причины:\n"
                 f"• Нет прав на чтение таблицы\n"
-                f"• Таблица называется иначе\n"
-                f"• Поле 'key_code' отсутствует",
-                parse_mode="Markdown"
+                f"• Таблица называется иначе"
             )
             context.user_data['awaiting_key'] = False
             return
         
-        # 3. АНАЛИЗИРУЕМ РЕЗУЛЬТАТ
         key_data = search_response.json()
         
         if not key_data or len(key_data) == 0:
-            # КЛЮЧ НЕ НАЙДЕН - ПОКАЗЫВАЕМ ВСЕ КЛЮЧИ ПОЛЬЗОВАТЕЛЯ
+            # КЛЮЧ НЕ НАЙДЕН
             user_keys_url = f"{SUPABASE_URL}/rest/v1/redeem_keys"
             user_keys_params = {"user_id": f"eq.{user_id}"}
             user_keys_response = requests.get(user_keys_url, headers=SUPABASE_HEADERS, params=user_keys_params)
@@ -350,72 +341,62 @@ async def handle_key_input(update, context):
             if user_keys_response.status_code == 200:
                 user_keys = user_keys_response.json()
                 if user_keys:
-                    user_keys_text = f"\n📋 *Ваши ключи в базе:*\n"
-                    for uk in user_keys[:5]:  # Показываем первые 5
-                        user_keys_text += f"• `{uk['key_code']}` (Активирован: {uk['is_activated']})\n"
+                    user_keys_text = f"\n📋 ВАШИ КЛЮЧИ В БАЗЕ:\n"
+                    for uk in user_keys[:5]:
+                        user_keys_text += f"• {uk['key_code']} (Активирован: {uk['is_activated']})\n"
                 else:
-                    user_keys_text = f"\n📭 *У вас нет ключей в базе*"
+                    user_keys_text = f"\n📭 У ВАС НЕТ КЛЮЧЕЙ В БАЗЕ"
             
             await status_msg.edit_text(
-                f"❌ *КЛЮЧ НЕ НАЙДЕН!*\n\n"
-                f"🔑 *Введенный ключ:* `{key}`\n"
-                f"👤 *Ваш ID:* `{user_id}`\n\n"
-                f"📊 *Результаты проверки:*\n"
-                f"• Ключ `{key}` отсутствует в таблице 'redeem_keys'\n"
+                f"❌ КЛЮЧ НЕ НАЙДЕН!\n\n"
+                f"🔑 ВВЕДЕННЫЙ КЛЮЧ: {key}\n"
+                f"👤 ВАШ ID: {user_id}\n\n"
+                f"📊 РЕЗУЛЬТАТЫ ПРОВЕРКИ:\n"
+                f"• Ключ '{key}' отсутствует в таблице 'redeem_keys'\n"
                 f"{user_keys_text}\n\n"
-                f"🆘 *Что делать?*\n"
+                f"🆘 ЧТО ДЕЛАТЬ?\n"
                 f"1. Проверьте правильность написания ключа\n"
                 f"2. Убедитесь что ключ от этого бота\n"
-                f"3. Напишите в поддержку и предоставьте этот ключ",
-                parse_mode="Markdown"
+                f"3. Напишите в поддержку"
             )
             context.user_data['awaiting_key'] = False
             return
         
-        # 4. КЛЮЧ НАЙДЕН - ПРОВЕРЯЕМ ВЛАДЕЛЬЦА
         key_info = key_data[0]
         
         if str(key_info['user_id']) != str(user_id):
             await status_msg.edit_text(
-                f"❌ *НЕ ВАШ КЛЮЧ!*\n\n"
-                f"🔑 *Ключ:* `{key}`\n"
-                f"👤 *Ваш ID:* `{user_id}`\n"
-                f"👤 *Владелец ключа:* `{key_info['user_id']}`\n\n"
-                f"🔒 *Этот ключ принадлежит другому пользователю!*\n\n"
-                f"📌 *Если вы купили этот ключ,* обратитесь в поддержку.",
-                parse_mode="Markdown"
+                f"❌ НЕ ВАШ КЛЮЧ!\n\n"
+                f"🔑 КЛЮЧ: {key}\n"
+                f"👤 ВАШ ID: {user_id}\n"
+                f"👤 ВЛАДЕЛЕЦ КЛЮЧА: {key_info['user_id']}\n\n"
+                f"🔒 Этот ключ принадлежит другому пользователю!"
             )
             context.user_data['awaiting_key'] = False
             return
         
-        # 5. ПРОВЕРЯЕМ АКТИВАЦИЮ
         if key_info.get('is_activated', False):
             activated_at = key_info.get('activated_at', 'неизвестно')
             await status_msg.edit_text(
-                f"⚠️ *КЛЮЧ УЖЕ АКТИВИРОВАН!*\n\n"
-                f"🔑 *Ключ:* `{key}`\n"
-                f"📅 *Активирован:* {activated_at}\n\n"
-                f"🔒 *Каждый ключ можно активировать только один раз.*\n\n"
-                f"💡 *Если вы не активировали этот ключ,* обратитесь в поддержку.",
-                parse_mode="Markdown"
+                f"⚠️ КЛЮЧ УЖЕ АКТИВИРОВАН!\n\n"
+                f"🔑 КЛЮЧ: {key}\n"
+                f"📅 АКТИВИРОВАН: {activated_at}\n\n"
+                f"🔒 Каждый ключ можно активировать только один раз."
             )
             context.user_data['awaiting_key'] = False
             return
         
-        # 6. ПОЛУЧАЕМ ИНФОРМАЦИЮ О ТОВАРЕ
+        # ПОЛУЧАЕМ ТОВАР
         product_url = f"{SUPABASE_URL}/rest/v1/products"
         product_params = {"id": f"eq.{key_info['product_id']}"}
         product_response = requests.get(product_url, headers=SUPABASE_HEADERS, params=product_params)
         
         if product_response.status_code != 200:
             await status_msg.edit_text(
-                f"⚠️ *КЛЮЧ НАЙДЕН, НО ОШИБКА ТОВАРА!*\n\n"
-                f"🔑 *Ключ:* `{key}`\n"
-                f"📦 *ID товара:* {key_info['product_id']}\n"
-                f"❌ *Ошибка загрузки товара:* {product_response.status_code}\n"
-                f"📝 *Ответ:* {product_response.text[:200]}\n\n"
-                f"👨‍💻 *Сообщите администратору*",
-                parse_mode="Markdown"
+                f"⚠️ КЛЮЧ НАЙДЕН, НО ОШИБКА ТОВАРА!\n\n"
+                f"🔑 КЛЮЧ: {key}\n"
+                f"📦 ID ТОВАРА: {key_info['product_id']}\n"
+                f"❌ ОШИБКА: {product_response.status_code}"
             )
             context.user_data['awaiting_key'] = False
             return
@@ -424,18 +405,16 @@ async def handle_key_input(update, context):
         
         if not product_data or len(product_data) == 0:
             await status_msg.edit_text(
-                f"⚠️ *ТОВАР НЕ НАЙДЕН!*\n\n"
-                f"🔑 *Ключ:* `{key}`\n"
-                f"📦 *ID товара:* {key_info['product_id']}\n\n"
-                f"❌ *Товар с таким ID отсутствует в таблице 'products'*",
-                parse_mode="Markdown"
+                f"⚠️ ТОВАР НЕ НАЙДЕН!\n\n"
+                f"🔑 КЛЮЧ: {key}\n"
+                f"📦 ID ТОВАРА: {key_info['product_id']}"
             )
             context.user_data['awaiting_key'] = False
             return
         
-        # 7. АКТИВИРУЕМ КЛЮЧ
         product = product_data[0]
         
+        # АКТИВИРУЕМ
         update_url = f"{SUPABASE_URL}/rest/v1/redeem_keys"
         update_params = {"key_code": f"eq.{key}"}
         update_data = {
@@ -447,46 +426,37 @@ async def handle_key_input(update, context):
         
         if patch_response.status_code not in [200, 204]:
             await status_msg.edit_text(
-                f"⚠️ *НЕ УДАЛОСЬ АКТИВИРОВАТЬ!*\n\n"
-                f"🔑 *Ключ найден:* `{key}`\n"
-                f"🎁 *Товар:* {product['name']}\n"
-                f"❌ *Ошибка активации:* {patch_response.status_code}\n"
-                f"📝 *Ответ:* {patch_response.text[:200]}\n\n"
-                f"🔑 *Попробуйте использовать ключ еще раз* или обратитесь в поддержку.",
-                parse_mode="Markdown"
+                f"⚠️ НЕ УДАЛОСЬ АКТИВИРОВАТЬ!\n\n"
+                f"🔑 КЛЮЧ НАЙДЕН: {key}\n"
+                f"🎁 ТОВАР: {product['name']}\n"
+                f"❌ ОШИБКА АКТИВАЦИИ: {patch_response.status_code}"
             )
             context.user_data['awaiting_key'] = False
             return
         
-        # 8. УСПЕХ!
+        # УСПЕХ
         await status_msg.edit_text(
-            f"✅ *АКТИВАЦИЯ УСПЕШНА!*\n\n"
-            f"🔑 *Ключ:* `{key}`\n"
-            f"🎁 *Товар:* {product['name']}\n"
-            f"🔗 *Ссылка:* {product['download_link']}\n\n"
-            f"💾 *Сохраните ссылку!*\n"
-            f"⭐ *Спасибо за покупку в HACK.NET!*",
-            parse_mode="Markdown",
-            disable_web_page_preview=True
+            f"✅ АКТИВАЦИЯ УСПЕШНА!\n\n"
+            f"🔑 КЛЮЧ: {key}\n"
+            f"🎁 ТОВАР: {product['name']}\n"
+            f"🔗 ССЫЛКА: {product['download_link']}\n\n"
+            f"💾 СОХРАНИТЕ ССЫЛКУ!\n"
+            f"⭐ СПАСИБО ЗА ПОКУПКУ!"
         )
         
     except Exception as e:
+        error_text = str(e)
         await status_msg.edit_text(
-            f"💥 *КРИТИЧЕСКАЯ ОШИБКА!*\n\n"
-            f"🔥 *Исключение:* `{type(e).__name__}`\n"
-            f"📝 *Текст:* `{str(e)}`\n\n"
-            f"🔧 *Полный отчет отправлен администратору*\n\n"
-            f"👨‍💻 *Пожалуйста, подождите* - проблема будет решена.",
-            parse_mode="Markdown"
+            f"💥 КРИТИЧЕСКАЯ ОШИБКА!\n\n"
+            f"🔥 ОШИБКА: {error_text[:200]}\n\n"
+            f"👨‍💻 СООБЩИТЕ АДМИНИСТРАТОРУ\n"
+            f"КЛЮЧ: {key}\n"
+            f"USER ID: {user_id}"
         )
         # ОТПРАВЛЯЕМ АДМИНУ
         await context.bot.send_message(
             chat_id=ADMIN_CHAT_ID,
-            text=f"💥 *ОШИБКА В handle_key_input*\n\n"
-                 f"Пользователь: {user_id}\n"
-                 f"Ключ: {key}\n"
-                 f"Ошибка: {type(e).__name__}: {str(e)}",
-            parse_mode="Markdown"
+            text=f"💥 ОШИБКА В handle_key_input\n\nПользователь: {user_id}\nКлюч: {key}\nОшибка: {error_text[:300]}"
         )
     
     context.user_data['awaiting_key'] = False
