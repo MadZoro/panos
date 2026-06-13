@@ -268,90 +268,44 @@ async def handle_key_input(update, context):
     key = update.message.text.strip().upper()
     user_id = update.effective_user.id
     
-    # Исправленный поиск ключа - используем прямой запрос с фильтром
-    url = f"{SUPABASE_URL}/rest/v1/redeem_keys"
-    params = {"key_code": f"eq.{key}"}
+    # 1. Поиск ключа (прямой URL без кодирования точки)
+    search_url = f"{SUPABASE_URL}/rest/v1/redeem_keys?key_code=eq.{key}"
+    response = requests.get(search_url, headers=SUPABASE_HEADERS)
     
-    try:
-        response = requests.get(url, headers=SUPABASE_HEADERS, params=params)
+    if response.status_code != 200 or not response.json():
+        await update.message.reply_text("❌ *Ключ не найден или ошибка базы*", parse_mode="Markdown")
+        context.user_data['awaiting_key'] = False
+        return
         
-        if response.status_code == 200:
-            key_data = response.json()
-        else:
-            logger.error(f"Ошибка поиска ключа: {response.status_code} - {response.text}")
-            await update.message.reply_text("❌ *Ошибка проверки ключа*", parse_mode="Markdown")
-            context.user_data['awaiting_key'] = False
-            return
-    except Exception as e:
-        logger.error(f"Ошибка запроса: {e}")
-        await update.message.reply_text("❌ *Ошибка соединения с сервером*", parse_mode="Markdown")
-        context.user_data['awaiting_key'] = False
+    key_info = response.json()[0]
+    
+    # 2. Проверки (приводим к int для сравнения)
+    if int(key_info['user_id']) != int(user_id):
+        await update.message.reply_text("❌ *Этот ключ не ваш*", parse_mode="Markdown")
         return
-    
-    if not key_data or len(key_data) == 0:
-        await update.message.reply_text("❌ *Неверный ключ активации*\n\nПроверьте правильность ввода ключа.", parse_mode="Markdown")
-        context.user_data['awaiting_key'] = False
-        return
-    
-    key_info = key_data[0]
-    
-    # Сравниваем user_id (преобразуем в строку для надежности)
-    if str(key_info['user_id']) != str(user_id):
-        await update.message.reply_text("❌ *Этот ключ не принадлежит вам*", parse_mode="Markdown")
-        context.user_data['awaiting_key'] = False
-        return
-    
-    if key_info.get('is_activated', False):
-        await update.message.reply_text("❌ *Этот ключ уже активирован*", parse_mode="Markdown")
-        context.user_data['awaiting_key'] = False
-        return
-    
-    # Получаем информацию о товаре
-    product_url = f"{SUPABASE_URL}/rest/v1/products"
-    product_params = {"id": f"eq.{key_info['product_id']}"}
-    
-    try:
-        product_response = requests.get(product_url, headers=SUPABASE_HEADERS, params=product_params)
-        if product_response.status_code == 200:
-            product_data = product_response.json()
-        else:
-            await update.message.reply_text("❌ *Ошибка получения информации о товаре*", parse_mode="Markdown")
-            context.user_data['awaiting_key'] = False
-            return
-    except Exception as e:
-        logger.error(f"Ошибка получения товара: {e}")
-        await update.message.reply_text("❌ *Ошибка сервера*", parse_mode="Markdown")
-        context.user_data['awaiting_key'] = False
-        return
-    
-    if product_data and len(product_data) > 0:
-        product = product_data[0]
         
-        # Обновляем статус ключа
-        update_url = f"{SUPABASE_URL}/rest/v1/redeem_keys"
-        update_params = {"key_code": f"eq.{key}"}
-        update_data = {
-            "is_activated": True, 
-            "activated_at": datetime.now().isoformat()
-        }
+    if key_info.get('is_activated'):
+        await update.message.reply_text("❌ *Ключ уже активирован*", parse_mode="Markdown")
+        return
         
-        try:
-            patch_response = requests.patch(update_url, headers=SUPABASE_HEADERS, params=update_params, json=update_data)
-            if patch_response.status_code not in [200, 204]:
-                logger.error(f"Ошибка обновления ключа: {patch_response.status_code}")
-        except Exception as e:
-            logger.error(f"Ошибка при обновлении: {e}")
+    # 3. Активация (Patch)
+    patch_url = f"{SUPABASE_URL}/rest/v1/redeem_keys?key_code=eq.{key}"
+    patch_data = {"is_activated": True, "activated_at": datetime.now().isoformat()}
+    
+    patch_resp = requests.patch(patch_url, headers=SUPABASE_HEADERS, json=patch_data)
+    
+    if patch_resp.status_code in [200, 204]:
+        # Получаем данные товара для сообщения
+        product_resp = requests.get(f"{SUPABASE_URL}/rest/v1/products?id=eq.{key_info['product_id']}", headers=SUPABASE_HEADERS)
+        product = product_resp.json()[0] if product_resp.status_code == 200 else {"name": "Товар", "download_link": "ссылка"}
         
         await update.message.reply_text(
-            f"✅ *Успешно!*\n\n"
-            f"🎁 *Товар:* {product['name']}\n"
-            f"🔗 *Ссылка:* {product['download_link']}\n\n"
-            f"Спасибо за покупку в HACK.NET!",
+            f"✅ *Успешно!*\n🎁 *Товар:* {product['name']}\n🔗 `{product['download_link']}`",
             parse_mode="Markdown"
         )
     else:
-        await update.message.reply_text("❌ *Товар не найден*", parse_mode="Markdown")
-    
+        await update.message.reply_text("❌ *Ошибка активации в базе*", parse_mode="Markdown")
+        
     context.user_data['awaiting_key'] = False
 
 async def tech_support(update, context):
