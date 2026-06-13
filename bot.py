@@ -162,98 +162,29 @@ async def successful_payment(update, context):
     payment = update.message.successful_payment
     product_id = int(payment.invoice_payload.split("_")[1])
     
-    logger.info(f"Успешная оплата от {user.id}, продукт: {product_id}")
+    product_data = supabase_request("get", "products", params={"id": f"eq.{product_id}"})
     
-    # Получаем информацию о товаре
-    product_url = f"{SUPABASE_URL}/rest/v1/products"
-    product_params = {"id": f"eq.{product_id}"}
-    
-    try:
-        product_response = requests.get(product_url, headers=SUPABASE_HEADERS, params=product_params)
-        if product_response.status_code == 200:
-            product_data = product_response.json()
-        else:
-            logger.error(f"Ошибка получения товара: {product_response.status_code}")
-            await update.message.reply_text("❌ *Ошибка: товар не найден*", parse_mode="Markdown")
-            return
-    except Exception as e:
-        logger.error(f"Ошибка запроса товара: {e}")
-        await update.message.reply_text("❌ *Ошибка сервера*", parse_mode="Markdown")
-        return
-    
-    if not product_data or len(product_data) == 0:
-        await update.message.reply_text("❌ *Товар не найден*", parse_mode="Markdown")
-        return
-    
-    product = product_data[0]
-    new_key = generate_key()
-    
-    logger.info(f"Сгенерирован ключ: {new_key} для пользователя {user.id}")
-    
-    # Сохраняем ключ в таблицу redeem_keys
-    key_data = {
-        "user_id": str(user.id),  # Преобразуем в строку для надежности
-        "product_id": product_id,
-        "key_code": new_key,
-        "is_activated": False,
-        "created_at": datetime.now().isoformat()
-    }
-    
-    try:
-        # Прямой POST запрос в Supabase
-        post_url = f"{SUPABASE_URL}/rest/v1/redeem_keys"
-        post_response = requests.post(post_url, headers=SUPABASE_HEADERS, json=key_data)
+    if product_data:
+        product = product_data[0]
+        new_key = generate_key()
         
-        if post_response.status_code in [200, 201, 204]:
-            logger.info(f"Ключ успешно сохранен в БД: {new_key}")
-            
-            # Отправляем ключ пользователю
-            await update.message.reply_text(
-                f"✅ *Оплата прошла успешно!*\n\n"
-                f"📦 *Товар:* {product['name']}\n"
-                f"🔑 *Ваш ключ:* `{new_key}`\n\n"
-                f"⚠️ *Сохраните ключ!*\n"
-                f"Используйте команду /redeem для активации.",
-                parse_mode="Markdown"
-            )
-            
-            # Отправляем уведомление админу
-            await context.bot.send_message(
-                chat_id=ADMIN_CHAT_ID,
-                text=f"💰 *НОВАЯ ПРОДАЖА!*\n\n"
-                     f"👤 *Пользователь:* {user.username or user.first_name}\n"
-                     f"🆔 *ID:* `{user.id}`\n"
-                     f"📦 *Товар:* {product['name']}\n"
-                     f"💰 *Цена:* {product['price']} ⭐\n"
-                     f"🔑 *Ключ:* `{new_key}`",
-                parse_mode="Markdown"
-            )
-        else:
-            logger.error(f"Ошибка сохранения ключа: {post_response.status_code} - {post_response.text}")
-            await update.message.reply_text(
-                f"❌ *Ошибка при сохранении ключа*\n"
-                f"Пожалуйста, обратитесь в поддержку и сообщите ID платежа.\n"
-                f"Ваш ID: `{user.id}`",
-                parse_mode="Markdown"
-            )
-            
-            # Уведомляем админа о проблеме
-            await context.bot.send_message(
-                chat_id=ADMIN_CHAT_ID,
-                text=f"⚠️ *ПРОБЛЕМА С СОХРАНЕНИЕМ КЛЮЧА!*\n\n"
-                     f"👤 *Пользователь:* {user.id}\n"
-                     f"📦 *Товар:* {product['name']}\n"
-                     f"🔑 *Ключ:* `{new_key}`\n"
-                     f"❌ *Ошибка:* {post_response.status_code}\n"
-                     f"📝 *Ответ:* {post_response.text[:200]}",
-                parse_mode="Markdown"
-            )
-            
-    except Exception as e:
-        logger.error(f"Исключение при сохранении ключа: {e}")
+        # СОХРАНЯЕМ КЛЮЧ - используем существующие поля таблицы
+        key_data = {
+            "key_code": new_key,
+            "product_id": product_id,
+            "is_used": False,           # вместо is_activated
+            "used_by": user.id,         # вместо user_id
+            "used_at": None,
+            "created_at": datetime.now().isoformat()
+        }
+        
+        supabase_request("post", "redeem_keys", data=key_data)
+        
         await update.message.reply_text(
-            "❌ *Техническая ошибка при сохранении ключа*\n"
-            "Пожалуйста, обратитесь в поддержку.",
+            f"✅ *Оплата прошла успешно!*\n\n"
+            f"🎁 *Товар:* {product['name']}\n"
+            f"🔑 *Ваш ключ активации:*\n`{new_key}`\n\n"
+            f"💡 *Используйте команду* `/redeem` *для активации ключа*",
             parse_mode="Markdown"
         )
 
@@ -268,196 +199,49 @@ async def handle_key_input(update, context):
     key = update.message.text.strip().upper()
     user_id = update.effective_user.id
     
-    # ОТПРАВЛЯЕМ СООБЩЕНИЕ О НАЧАЛЕ ПРОВЕРКИ (БЕЗ ПАРСИНГА)
-    status_msg = await update.message.reply_text(
-        f"🔍 ПРОВЕРЯЮ КЛЮЧ: {key}\n"
-        f"👤 ВАШ ID: {user_id}\n\n"
-        f"⏳ ИДЕТ ПОИСК В БАЗЕ ДАННЫХ..."
-    )
+    # Ищем ключ в таблице redeem_keys
+    key_data = supabase_request("get", "redeem_keys", params={"key_code": f"eq.{key}"})
     
-    # 1. ПРОВЕРЯЕМ СУЩЕСТВУЕТ ЛИ ТАБЛИЦА redeem_keys
-    try:
-        test_url = f"{SUPABASE_URL}/rest/v1/redeem_keys?limit=1"
-        test_response = requests.get(test_url, headers=SUPABASE_HEADERS)
-        
-        if test_response.status_code != 200:
-            await status_msg.edit_text(
-                f"❌ КРИТИЧЕСКАЯ ОШИБКА!\n\n"
-                f"📊 Таблица redeem_keys не доступна\n"
-                f"📡 Статус: {test_response.status_code}\n"
-                f"📝 Ответ сервера:\n{test_response.text[:300]}\n\n"
-                f"👨‍💻 Сообщите администратору:\n"
-                f"Таблица 'redeem_keys' не существует или нет прав доступа!"
-            )
-            context.user_data['awaiting_key'] = False
-            return
-    except Exception as e:
-        await status_msg.edit_text(
-            f"❌ НЕВОЗМОЖНО ПОДКЛЮЧИТЬСЯ К БАЗЕ!\n\n"
-            f"🔥 Ошибка: {str(e)}\n\n"
-            f"🔧 Проверьте:\n"
-            f"• SUPABASE_URL: {SUPABASE_URL}\n"
-            f"• Интернет соединение"
-        )
+    if not key_data:
+        await update.message.reply_text("❌ *Неверный ключ активации*", parse_mode="Markdown")
         context.user_data['awaiting_key'] = False
         return
     
-    # 2. ИЩЕМ КЛЮЧ В БАЗЕ
-    try:
-        search_url = f"{SUPABASE_URL}/rest/v1/redeem_keys"
-        search_params = {"key_code": f"eq.{key}"}
-        
-        await status_msg.edit_text(
-            f"🔍 ИЩУ КЛЮЧ: {key}\n"
-            f"📡 ЗАПРОС К БАЗЕ...\n"
-            f"⏳ ОЖИДАНИЕ ОТВЕТА..."
-        )
-        
-        search_response = requests.get(search_url, headers=SUPABASE_HEADERS, params=search_params)
-        
-        if search_response.status_code != 200:
-            await status_msg.edit_text(
-                f"❌ ОШИБКА ПОИСКА КЛЮЧА!\n\n"
-                f"📡 HTTP СТАТУС: {search_response.status_code}\n"
-                f"📝 ОТВЕТ SUPABASE:\n{search_response.text[:500]}\n\n"
-                f"🔑 ВАШ КЛЮЧ: {key}\n"
-                f"👤 ВАШ ID: {user_id}\n\n"
-                f"💡 Возможные причины:\n"
-                f"• Нет прав на чтение таблицы\n"
-                f"• Таблица называется иначе"
-            )
-            context.user_data['awaiting_key'] = False
-            return
-        
-        key_data = search_response.json()
-        
-        if not key_data or len(key_data) == 0:
-            # КЛЮЧ НЕ НАЙДЕН
-            user_keys_url = f"{SUPABASE_URL}/rest/v1/redeem_keys"
-            user_keys_params = {"user_id": f"eq.{user_id}"}
-            user_keys_response = requests.get(user_keys_url, headers=SUPABASE_HEADERS, params=user_keys_params)
-            
-            user_keys_text = ""
-            if user_keys_response.status_code == 200:
-                user_keys = user_keys_response.json()
-                if user_keys:
-                    user_keys_text = f"\n📋 ВАШИ КЛЮЧИ В БАЗЕ:\n"
-                    for uk in user_keys[:5]:
-                        user_keys_text += f"• {uk['key_code']} (Активирован: {uk['is_activated']})\n"
-                else:
-                    user_keys_text = f"\n📭 У ВАС НЕТ КЛЮЧЕЙ В БАЗЕ"
-            
-            await status_msg.edit_text(
-                f"❌ КЛЮЧ НЕ НАЙДЕН!\n\n"
-                f"🔑 ВВЕДЕННЫЙ КЛЮЧ: {key}\n"
-                f"👤 ВАШ ID: {user_id}\n\n"
-                f"📊 РЕЗУЛЬТАТЫ ПРОВЕРКИ:\n"
-                f"• Ключ '{key}' отсутствует в таблице 'redeem_keys'\n"
-                f"{user_keys_text}\n\n"
-                f"🆘 ЧТО ДЕЛАТЬ?\n"
-                f"1. Проверьте правильность написания ключа\n"
-                f"2. Убедитесь что ключ от этого бота\n"
-                f"3. Напишите в поддержку"
-            )
-            context.user_data['awaiting_key'] = False
-            return
-        
-        key_info = key_data[0]
-        
-        if str(key_info['user_id']) != str(user_id):
-            await status_msg.edit_text(
-                f"❌ НЕ ВАШ КЛЮЧ!\n\n"
-                f"🔑 КЛЮЧ: {key}\n"
-                f"👤 ВАШ ID: {user_id}\n"
-                f"👤 ВЛАДЕЛЕЦ КЛЮЧА: {key_info['user_id']}\n\n"
-                f"🔒 Этот ключ принадлежит другому пользователю!"
-            )
-            context.user_data['awaiting_key'] = False
-            return
-        
-        if key_info.get('is_activated', False):
-            activated_at = key_info.get('activated_at', 'неизвестно')
-            await status_msg.edit_text(
-                f"⚠️ КЛЮЧ УЖЕ АКТИВИРОВАН!\n\n"
-                f"🔑 КЛЮЧ: {key}\n"
-                f"📅 АКТИВИРОВАН: {activated_at}\n\n"
-                f"🔒 Каждый ключ можно активировать только один раз."
-            )
-            context.user_data['awaiting_key'] = False
-            return
-        
-        # ПОЛУЧАЕМ ТОВАР
-        product_url = f"{SUPABASE_URL}/rest/v1/products"
-        product_params = {"id": f"eq.{key_info['product_id']}"}
-        product_response = requests.get(product_url, headers=SUPABASE_HEADERS, params=product_params)
-        
-        if product_response.status_code != 200:
-            await status_msg.edit_text(
-                f"⚠️ КЛЮЧ НАЙДЕН, НО ОШИБКА ТОВАРА!\n\n"
-                f"🔑 КЛЮЧ: {key}\n"
-                f"📦 ID ТОВАРА: {key_info['product_id']}\n"
-                f"❌ ОШИБКА: {product_response.status_code}"
-            )
-            context.user_data['awaiting_key'] = False
-            return
-        
-        product_data = product_response.json()
-        
-        if not product_data or len(product_data) == 0:
-            await status_msg.edit_text(
-                f"⚠️ ТОВАР НЕ НАЙДЕН!\n\n"
-                f"🔑 КЛЮЧ: {key}\n"
-                f"📦 ID ТОВАРА: {key_info['product_id']}"
-            )
-            context.user_data['awaiting_key'] = False
-            return
-        
+    key_info = key_data[0]
+    
+    # Проверяем использован ли ключ (is_used вместо is_activated)
+    if key_info.get('is_used'):
+        await update.message.reply_text("❌ *Этот ключ уже был использован*", parse_mode="Markdown")
+        context.user_data['awaiting_key'] = False
+        return
+    
+    # Проверяем принадлежит ли ключ этому пользователю (used_by вместо user_id)
+    if key_info.get('used_by') and key_info['used_by'] != user_id:
+        await update.message.reply_text("❌ *Этот ключ не принадлежит вам*", parse_mode="Markdown")
+        context.user_data['awaiting_key'] = False
+        return
+    
+    # Получаем товар
+    product_data = supabase_request("get", "products", params={"id": f"eq.{key_info['product_id']}"})
+    
+    if product_data:
         product = product_data[0]
         
-        # АКТИВИРУЕМ
-        update_url = f"{SUPABASE_URL}/rest/v1/redeem_keys"
-        update_params = {"key_code": f"eq.{key}"}
-        update_data = {
-            "is_activated": True,
-            "activated_at": datetime.now().isoformat()
-        }
-        
-        patch_response = requests.patch(update_url, headers=SUPABASE_HEADERS, params=update_params, json=update_data)
-        
-        if patch_response.status_code not in [200, 204]:
-            await status_msg.edit_text(
-                f"⚠️ НЕ УДАЛОСЬ АКТИВИРОВАТЬ!\n\n"
-                f"🔑 КЛЮЧ НАЙДЕН: {key}\n"
-                f"🎁 ТОВАР: {product['name']}\n"
-                f"❌ ОШИБКА АКТИВАЦИИ: {patch_response.status_code}"
-            )
-            context.user_data['awaiting_key'] = False
-            return
-        
-        # УСПЕХ
-        await status_msg.edit_text(
-            f"✅ АКТИВАЦИЯ УСПЕШНА!\n\n"
-            f"🔑 КЛЮЧ: {key}\n"
-            f"🎁 ТОВАР: {product['name']}\n"
-            f"🔗 ССЫЛКА: {product['download_link']}\n\n"
-            f"💾 СОХРАНИТЕ ССЫЛКУ!\n"
-            f"⭐ СПАСИБО ЗА ПОКУПКУ!"
+        # Активируем ключ (обновляем is_used и used_at)
+        supabase_request("patch", "redeem_keys",
+            params={"key_code": f"eq.{key}"},
+            data={"is_used": True, "used_at": datetime.now().isoformat()}
         )
         
-    except Exception as e:
-        error_text = str(e)
-        await status_msg.edit_text(
-            f"💥 КРИТИЧЕСКАЯ ОШИБКА!\n\n"
-            f"🔥 ОШИБКА: {error_text[:200]}\n\n"
-            f"👨‍💻 СООБЩИТЕ АДМИНИСТРАТОРУ\n"
-            f"КЛЮЧ: {key}\n"
-            f"USER ID: {user_id}"
+        await update.message.reply_text(
+            f"✅ *Ключ успешно активирован!*\n\n"
+            f"🎁 *Ваш товар:* {product['name']}\n"
+            f"🔗 *Ссылка для скачивания:*\n`{product['download_link']}`\n\n"
+            f"💾 *Сохраните ссылку!*",
+            parse_mode="Markdown"
         )
-        # ОТПРАВЛЯЕМ АДМИНУ
-        await context.bot.send_message(
-            chat_id=ADMIN_CHAT_ID,
-            text=f"💥 ОШИБКА В handle_key_input\n\nПользователь: {user_id}\nКлюч: {key}\nОшибка: {error_text[:300]}"
-        )
+    else:
+        await update.message.reply_text("✅ *Ключ активирован!*", parse_mode="Markdown")
     
     context.user_data['awaiting_key'] = False
 
