@@ -168,12 +168,12 @@ async def successful_payment(update, context):
         product = product_data[0]
         new_key = generate_key()
         
-        # СОХРАНЯЕМ КЛЮЧ - используем существующие поля таблицы
+        # СОХРАНЯЕМ В redeem_keys (НЕ В user_keys!)
         key_data = {
             "key_code": new_key,
             "product_id": product_id,
-            "is_used": False,           # вместо is_activated
-            "used_by": user.id,         # вместо user_id
+            "is_used": False,
+            "used_by": user.id,
             "used_at": None,
             "created_at": datetime.now().isoformat()
         }
@@ -181,10 +181,10 @@ async def successful_payment(update, context):
         supabase_request("post", "redeem_keys", data=key_data)
         
         await update.message.reply_text(
-            f"✅ *Оплата прошла успешно!*\n\n"
+            f"✅ *Оплата прошла!*\n\n"
             f"🎁 *Товар:* {product['name']}\n"
-            f"🔑 *Ваш ключ активации:*\n`{new_key}`\n\n"
-            f"💡 *Используйте команду* `/redeem` *для активации ключа*",
+            f"🔑 *Ключ:* `{new_key}`\n\n"
+            f"💡 *Введите* `/redeem` *и ключ для активации*",
             parse_mode="Markdown"
         )
 
