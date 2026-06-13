@@ -158,7 +158,6 @@ async def pre_checkout_query(update, context):
     await update.pre_checkout_query.answer(ok=True)
 
 async def successful_payment(update, context):
-    """ПОСЛЕ ОПЛАТЫ: ГЕНЕРИРУЕМ КЛЮЧ, СОХРАНЯЕМ В БД, ОТДАЁМ ПОЛЬЗОВАТЕЛЮ"""
     user = update.effective_user
     payment = update.message.successful_payment
     product_id = int(payment.invoice_payload.split("_")[1])
@@ -167,12 +166,10 @@ async def successful_payment(update, context):
     
     if product_data:
         product = product_data[0]
-        
-        # ГЕНЕРИРУЕМ НОВЫЙ КЛЮЧ
         new_key = generate_key()
         
-        # СОХРАНЯЕМ КЛЮЧ В БД (связываем с пользователем и товаром)
-        supabase_request("post", "user_keys", data={
+        # СОХРАНЯЕМ В ТАБЛИЦУ redeem_keys
+        supabase_request("post", "redeem_keys", data={
             "user_id": user.id,
             "product_id": product_id,
             "key_code": new_key,
@@ -180,24 +177,9 @@ async def successful_payment(update, context):
             "created_at": datetime.now().isoformat()
         })
         
-        # ОТПРАВЛЯЕМ КЛЮЧ ПОЛЬЗОВАТЕЛЮ
         await update.message.reply_text(
             f"✅ *Оплата прошла успешно!*\n\n"
-            f"🎁 *Товар:* {product['name']}\n"
-            f"🔑 *Ваш ключ активации:*\n`{new_key}`\n\n"
-            f"💡 *Используйте команду* `/redeem` *для активации ключа*\n\n"
-            f"🙏 *Спасибо за покупку в HACK.NET!*",
-            parse_mode="Markdown"
-        )
-        
-        # Уведомление админу
-        await context.bot.send_message(
-            ADMIN_CHAT_ID,
-            f"💰 *НОВАЯ ПОКУПКА!*\n"
-            f"👤 *Пользователь:* @{user.username} ({user.id})\n"
-            f"📦 *Товар:* {product['name']}\n"
-            f"⭐ *Сумма:* {payment.total_amount} звезд\n"
-            f"🔑 *Сгенерирован ключ:* `{new_key}`",
+            f"🔑 *Ваш ключ:* `{new_key}`",
             parse_mode="Markdown"
         )
 
@@ -212,53 +194,39 @@ async def handle_key_input(update, context):
     key = update.message.text.strip().upper()
     user_id = update.effective_user.id
     
-    logger.info(f"DEBUG: Попытка активации ключа '{key}' пользователем {user_id}")
-
-    # Ищем ключ в таблице user_keys
-    # Важно: убедись, что в Supabase колонка key_code именно так называется
-    key_data = supabase_request("get", "user_keys", params={"key_code": f"eq.{key}"})
-    
-    logger.info(f"DEBUG: Результат запроса к БД: {key_data}")
+    # ИЩЕМ В ТАБЛИЦЕ redeem_keys
+    key_data = supabase_request("get", "redeem_keys", params={"key_code": f"eq.{key}"})
     
     if not key_data:
-        await update.message.reply_text("❌ *Неверный ключ активации (не найден в базе)*", parse_mode="Markdown")
+        await update.message.reply_text("❌ *Неверный ключ активации*", parse_mode="Markdown")
         context.user_data['awaiting_key'] = False
         return
     
     key_info = key_data[0]
     
-    # Проверяем принадлежит ли ключ этому пользователю
     if int(key_info['user_id']) != int(user_id):
         await update.message.reply_text("❌ *Этот ключ не принадлежит вам*", parse_mode="Markdown")
-        context.user_data['awaiting_key'] = False
         return
     
-    # Проверяем не активирован ли уже ключ
     if key_info.get('is_activated'):
-        await update.message.reply_text("❌ *Этот ключ уже был активирован*", parse_mode="Markdown")
-        context.user_data['awaiting_key'] = False
+        await update.message.reply_text("❌ *Этот ключ уже активирован*", parse_mode="Markdown")
         return
     
-    # Получаем товар
     product_data = supabase_request("get", "products", params={"id": f"eq.{key_info['product_id']}"})
     
     if product_data:
         product = product_data[0]
         
-        # Активируем ключ
-        supabase_request("patch", "user_keys",
+        # ОБНОВЛЯЕМ В redeem_keys
+        supabase_request("patch", "redeem_keys",
             params={"key_code": f"eq.{key}"},
             data={"is_activated": True, "activated_at": datetime.now().isoformat()}
         )
         
         await update.message.reply_text(
-            f"✅ *Ключ успешно активирован!*\n\n"
-            f"🎁 *Ваш товар:* {product['name']}\n"
-            f"🔗 *Ссылка для скачивания:*\n`{product['download_link']}`",
+            f"✅ *Успешно!*\n🎁 *Товар:* {product['name']}\n🔗 `{product['download_link']}`",
             parse_mode="Markdown"
         )
-    else:
-        await update.message.reply_text("✅ *Ключ активирован!*", parse_mode="Markdown")
     
     context.user_data['awaiting_key'] = False
 
