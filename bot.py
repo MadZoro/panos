@@ -201,11 +201,16 @@ async def handle_key_input(update, context):
     if not context.user_data.get('awaiting_key'):
         return
     
-    key = update.message.text.strip().upper()
+    key = update.message.text.strip()  # НЕ ДЕЛАЕМ .upper()!
     user_id = update.effective_user.id
     
-    # Ищем ключ ТОЛЬКО в redeem_keys
+    # Ищем ключ ТОЧНО как ввели
     key_data = supabase_request("get", "redeem_keys", params={"key_code": f"eq.{key}"})
+    
+    # Если не нашли - пробуем с .upper()
+    if not key_data:
+        key_upper = key.upper()
+        key_data = supabase_request("get", "redeem_keys", params={"key_code": f"eq.{key_upper}"})
     
     if not key_data:
         await update.message.reply_text("❌ *Неверный ключ*", parse_mode="Markdown")
