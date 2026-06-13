@@ -168,12 +168,13 @@ async def successful_payment(update, context):
         product = product_data[0]
         new_key = generate_key()
         
-        # СОХРАНЯЕМ В ТАБЛИЦУ redeem_keys (других таблиц нет!)
+        # СОХРАНЯЕМ КЛЮЧ - used_by НЕ ЗАПОЛНЯЕМ
         key_data = {
             "key_code": new_key,
             "product_id": product_id,
             "is_used": False,
-            "used_by": user.id,
+            "used_by": None,  # ← пусто, заполнится при активации
+            "used_at": None,
             "created_at": datetime.now().isoformat()
         }
         
@@ -184,12 +185,7 @@ async def successful_payment(update, context):
                 f"✅ *Оплата прошла!*\n\n"
                 f"🎁 *Товар:* {product['name']}\n"
                 f"🔑 *Ключ:* `{new_key}`\n\n"
-                f"💡 *Используйте* `/redeem` *для активации*",
-                parse_mode="Markdown"
-            )
-        else:
-            await update.message.reply_text(
-                f"❌ *Ошибка сохранения ключа!*\nСообщите администратору",
+                f"💡 *Используйте* `/redeem {new_key}` *для активации*",
                 parse_mode="Markdown"
             )
 
@@ -201,14 +197,14 @@ async def handle_key_input(update, context):
     if not context.user_data.get('awaiting_key'):
         return
     
-    key = update.message.text.strip()  # НЕ ДЕЛАЕМ .upper()!
+    key = update.message.text.strip()
     user_id = update.effective_user.id
     
-    # Ищем ключ ТОЧНО как ввели
+    # Ищем ключ
     key_data = supabase_request("get", "redeem_keys", params={"key_code": f"eq.{key}"})
     
-    # Если не нашли - пробуем с .upper()
     if not key_data:
+        # пробуем с .upper()
         key_upper = key.upper()
         key_data = supabase_request("get", "redeem_keys", params={"key_code": f"eq.{key_upper}"})
     
@@ -231,10 +227,14 @@ async def handle_key_input(update, context):
     if product_data:
         product = product_data[0]
         
-        # Активируем
+        # АКТИВИРУЕМ КЛЮЧ - заполняем is_used, used_by, used_at
         supabase_request("patch", "redeem_keys",
             params={"key_code": f"eq.{key}"},
-            data={"is_used": True, "used_at": datetime.now().isoformat()}
+            data={
+                "is_used": True,
+                "used_by": user_id,  # ← ЗАПОЛНЯЕМ ТОЛЬКО ЗДЕСЬ
+                "used_at": datetime.now().isoformat()
+            }
         )
         
         await update.message.reply_text(
