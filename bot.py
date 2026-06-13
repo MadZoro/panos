@@ -199,25 +199,19 @@ async def handle_key_input(update, context):
     key = update.message.text.strip().upper()
     user_id = update.effective_user.id
     
-    # Ищем ключ в таблице redeem_keys
+    # Ищем ключ
     key_data = supabase_request("get", "redeem_keys", params={"key_code": f"eq.{key}"})
     
     if not key_data:
-        await update.message.reply_text("❌ *Неверный ключ активации*", parse_mode="Markdown")
+        await update.message.reply_text("❌ *Неверный ключ*", parse_mode="Markdown")
         context.user_data['awaiting_key'] = False
         return
     
     key_info = key_data[0]
     
-    # Проверяем использован ли ключ (is_used вместо is_activated)
+    # Проверяем не использован ли
     if key_info.get('is_used'):
-        await update.message.reply_text("❌ *Этот ключ уже был использован*", parse_mode="Markdown")
-        context.user_data['awaiting_key'] = False
-        return
-    
-    # Проверяем принадлежит ли ключ этому пользователю (used_by вместо user_id)
-    if key_info.get('used_by') and key_info['used_by'] != user_id:
-        await update.message.reply_text("❌ *Этот ключ не принадлежит вам*", parse_mode="Markdown")
+        await update.message.reply_text("❌ *Ключ уже использован*", parse_mode="Markdown")
         context.user_data['awaiting_key'] = False
         return
     
@@ -227,21 +221,24 @@ async def handle_key_input(update, context):
     if product_data:
         product = product_data[0]
         
-        # Активируем ключ (обновляем is_used и used_at)
+        # АКТИВИРУЕМ КЛЮЧ - ЗАПОЛНЯЕМ ВСЕ ПОЛЯ
         supabase_request("patch", "redeem_keys",
             params={"key_code": f"eq.{key}"},
-            data={"is_used": True, "used_at": datetime.now().isoformat()}
+            data={
+                "is_used": True, 
+                "used_at": datetime.now().isoformat(),
+                "used_by": user_id      # ← ВАЖНО!
+            }
         )
         
         await update.message.reply_text(
-            f"✅ *Ключ успешно активирован!*\n\n"
-            f"🎁 *Ваш товар:* {product['name']}\n"
-            f"🔗 *Ссылка для скачивания:*\n`{product['download_link']}`\n\n"
-            f"💾 *Сохраните ссылку!*",
+            f"✅ *Ключ активирован!*\n\n"
+            f"🎁 *Товар:* {product['name']}\n"
+            f"🔗 *Ссылка:* `{product['download_link']}`",
             parse_mode="Markdown"
         )
     else:
-        await update.message.reply_text("✅ *Ключ активирован!*", parse_mode="Markdown")
+        await update.message.reply_text("✅ *Ключ активирован*", parse_mode="Markdown")
     
     context.user_data['awaiting_key'] = False
 
