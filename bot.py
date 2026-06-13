@@ -162,24 +162,98 @@ async def successful_payment(update, context):
     payment = update.message.successful_payment
     product_id = int(payment.invoice_payload.split("_")[1])
     
-    product_data = supabase_request("get", "products", params={"id": f"eq.{product_id}"})
+    logger.info(f"Успешная оплата от {user.id}, продукт: {product_id}")
     
-    if product_data:
-        product = product_data[0]
-        new_key = generate_key()
+    # Получаем информацию о товаре
+    product_url = f"{SUPABASE_URL}/rest/v1/products"
+    product_params = {"id": f"eq.{product_id}"}
+    
+    try:
+        product_response = requests.get(product_url, headers=SUPABASE_HEADERS, params=product_params)
+        if product_response.status_code == 200:
+            product_data = product_response.json()
+        else:
+            logger.error(f"Ошибка получения товара: {product_response.status_code}")
+            await update.message.reply_text("❌ *Ошибка: товар не найден*", parse_mode="Markdown")
+            return
+    except Exception as e:
+        logger.error(f"Ошибка запроса товара: {e}")
+        await update.message.reply_text("❌ *Ошибка сервера*", parse_mode="Markdown")
+        return
+    
+    if not product_data or len(product_data) == 0:
+        await update.message.reply_text("❌ *Товар не найден*", parse_mode="Markdown")
+        return
+    
+    product = product_data[0]
+    new_key = generate_key()
+    
+    logger.info(f"Сгенерирован ключ: {new_key} для пользователя {user.id}")
+    
+    # Сохраняем ключ в таблицу redeem_keys
+    key_data = {
+        "user_id": str(user.id),  # Преобразуем в строку для надежности
+        "product_id": product_id,
+        "key_code": new_key,
+        "is_activated": False,
+        "created_at": datetime.now().isoformat()
+    }
+    
+    try:
+        # Прямой POST запрос в Supabase
+        post_url = f"{SUPABASE_URL}/rest/v1/redeem_keys"
+        post_response = requests.post(post_url, headers=SUPABASE_HEADERS, json=key_data)
         
-        # СОХРАНЯЕМ В ТАБЛИЦУ redeem_keys
-        supabase_request("post", "redeem_keys", data={
-            "user_id": user.id,
-            "product_id": product_id,
-            "key_code": new_key,
-            "is_activated": False,
-            "created_at": datetime.now().isoformat()
-        })
-        
+        if post_response.status_code in [200, 201, 204]:
+            logger.info(f"Ключ успешно сохранен в БД: {new_key}")
+            
+            # Отправляем ключ пользователю
+            await update.message.reply_text(
+                f"✅ *Оплата прошла успешно!*\n\n"
+                f"📦 *Товар:* {product['name']}\n"
+                f"🔑 *Ваш ключ:* `{new_key}`\n\n"
+                f"⚠️ *Сохраните ключ!*\n"
+                f"Используйте команду /redeem для активации.",
+                parse_mode="Markdown"
+            )
+            
+            # Отправляем уведомление админу
+            await context.bot.send_message(
+                chat_id=ADMIN_CHAT_ID,
+                text=f"💰 *НОВАЯ ПРОДАЖА!*\n\n"
+                     f"👤 *Пользователь:* {user.username or user.first_name}\n"
+                     f"🆔 *ID:* `{user.id}`\n"
+                     f"📦 *Товар:* {product['name']}\n"
+                     f"💰 *Цена:* {product['price']} ⭐\n"
+                     f"🔑 *Ключ:* `{new_key}`",
+                parse_mode="Markdown"
+            )
+        else:
+            logger.error(f"Ошибка сохранения ключа: {post_response.status_code} - {post_response.text}")
+            await update.message.reply_text(
+                f"❌ *Ошибка при сохранении ключа*\n"
+                f"Пожалуйста, обратитесь в поддержку и сообщите ID платежа.\n"
+                f"Ваш ID: `{user.id}`",
+                parse_mode="Markdown"
+            )
+            
+            # Уведомляем админа о проблеме
+            await context.bot.send_message(
+                chat_id=ADMIN_CHAT_ID,
+                text=f"⚠️ *ПРОБЛЕМА С СОХРАНЕНИЕМ КЛЮЧА!*\n\n"
+                     f"👤 *Пользователь:* {user.id}\n"
+                     f"📦 *Товар:* {product['name']}\n"
+                     f"🔑 *Ключ:* `{new_key}`\n"
+                     f"❌ *Ошибка:* {post_response.status_code}\n"
+                     f"📝 *Ответ:* {post_response.text[:200]}",
+                parse_mode="Markdown"
+            )
+            
+    except Exception as e:
+        logger.error(f"Исключение при сохранении ключа: {e}")
         await update.message.reply_text(
-            f"✅ *Оплата прошла успешно!*\n\n"
-            f"🔑 *Ваш ключ:* `{new_key}`",
+            "❌ *Техническая ошибка при сохранении ключа*\n"
+            "Пожалуйста, обратитесь в поддержку.",
             parse_mode="Markdown"
         )
 
@@ -194,39 +268,89 @@ async def handle_key_input(update, context):
     key = update.message.text.strip().upper()
     user_id = update.effective_user.id
     
-    # ИЩЕМ В ТАБЛИЦЕ redeem_keys
-    key_data = supabase_request("get", "redeem_keys", params={"key_code": f"eq.{key}"})
+    # Исправленный поиск ключа - используем прямой запрос с фильтром
+    url = f"{SUPABASE_URL}/rest/v1/redeem_keys"
+    params = {"key_code": f"eq.{key}"}
     
-    if not key_data:
-        await update.message.reply_text("❌ *Неверный ключ активации*", parse_mode="Markdown")
+    try:
+        response = requests.get(url, headers=SUPABASE_HEADERS, params=params)
+        
+        if response.status_code == 200:
+            key_data = response.json()
+        else:
+            logger.error(f"Ошибка поиска ключа: {response.status_code} - {response.text}")
+            await update.message.reply_text("❌ *Ошибка проверки ключа*", parse_mode="Markdown")
+            context.user_data['awaiting_key'] = False
+            return
+    except Exception as e:
+        logger.error(f"Ошибка запроса: {e}")
+        await update.message.reply_text("❌ *Ошибка соединения с сервером*", parse_mode="Markdown")
+        context.user_data['awaiting_key'] = False
+        return
+    
+    if not key_data or len(key_data) == 0:
+        await update.message.reply_text("❌ *Неверный ключ активации*\n\nПроверьте правильность ввода ключа.", parse_mode="Markdown")
         context.user_data['awaiting_key'] = False
         return
     
     key_info = key_data[0]
     
-    if int(key_info['user_id']) != int(user_id):
+    # Сравниваем user_id (преобразуем в строку для надежности)
+    if str(key_info['user_id']) != str(user_id):
         await update.message.reply_text("❌ *Этот ключ не принадлежит вам*", parse_mode="Markdown")
+        context.user_data['awaiting_key'] = False
         return
     
-    if key_info.get('is_activated'):
+    if key_info.get('is_activated', False):
         await update.message.reply_text("❌ *Этот ключ уже активирован*", parse_mode="Markdown")
+        context.user_data['awaiting_key'] = False
         return
     
-    product_data = supabase_request("get", "products", params={"id": f"eq.{key_info['product_id']}"})
+    # Получаем информацию о товаре
+    product_url = f"{SUPABASE_URL}/rest/v1/products"
+    product_params = {"id": f"eq.{key_info['product_id']}"}
     
-    if product_data:
+    try:
+        product_response = requests.get(product_url, headers=SUPABASE_HEADERS, params=product_params)
+        if product_response.status_code == 200:
+            product_data = product_response.json()
+        else:
+            await update.message.reply_text("❌ *Ошибка получения информации о товаре*", parse_mode="Markdown")
+            context.user_data['awaiting_key'] = False
+            return
+    except Exception as e:
+        logger.error(f"Ошибка получения товара: {e}")
+        await update.message.reply_text("❌ *Ошибка сервера*", parse_mode="Markdown")
+        context.user_data['awaiting_key'] = False
+        return
+    
+    if product_data and len(product_data) > 0:
         product = product_data[0]
         
-        # ОБНОВЛЯЕМ В redeem_keys
-        supabase_request("patch", "redeem_keys",
-            params={"key_code": f"eq.{key}"},
-            data={"is_activated": True, "activated_at": datetime.now().isoformat()}
-        )
+        # Обновляем статус ключа
+        update_url = f"{SUPABASE_URL}/rest/v1/redeem_keys"
+        update_params = {"key_code": f"eq.{key}"}
+        update_data = {
+            "is_activated": True, 
+            "activated_at": datetime.now().isoformat()
+        }
+        
+        try:
+            patch_response = requests.patch(update_url, headers=SUPABASE_HEADERS, params=update_params, json=update_data)
+            if patch_response.status_code not in [200, 204]:
+                logger.error(f"Ошибка обновления ключа: {patch_response.status_code}")
+        except Exception as e:
+            logger.error(f"Ошибка при обновлении: {e}")
         
         await update.message.reply_text(
-            f"✅ *Успешно!*\n🎁 *Товар:* {product['name']}\n🔗 `{product['download_link']}`",
+            f"✅ *Успешно!*\n\n"
+            f"🎁 *Товар:* {product['name']}\n"
+            f"🔗 *Ссылка:* {product['download_link']}\n\n"
+            f"Спасибо за покупку в HACK.NET!",
             parse_mode="Markdown"
         )
+    else:
+        await update.message.reply_text("❌ *Товар не найден*", parse_mode="Markdown")
     
     context.user_data['awaiting_key'] = False
 
