@@ -108,30 +108,25 @@ async def start(update, context):
 async def list_products(update, context):
     try:
         products = supabase_request("get", "products")
-        
         if not products:
-            await update.message.reply_text("📦 *Каталог временно пуст*", parse_mode="Markdown")
+            await send_response(update, context, "📦 *Каталог временно пуст*")
             return
         
         keyboard = []
         for product in products:
-            button = InlineKeyboardButton(
-                f"📦 {product['name']} — {product['price']} ⭐",
-                callback_data=f"buy_{product['id']}"
-            )
+            button = InlineKeyboardButton(f"📦 {product['name']} — {product['price']} ⭐", callback_data=f"buy_{product['id']}")
             keyboard.append([button])
         
         reply_markup = InlineKeyboardMarkup(keyboard)
-        await update.message.reply_text(
+        await send_response(update, context,
             f"🛍️ *КАТАЛОГ HACK.NET* 🛍️\n\n"
             f"▫️ *Доступно товаров:* {len(products)}\n"
             f"▫️ *Выберите позицию для покупки:*",
-            reply_markup=reply_markup,
-            parse_mode="Markdown"
+            reply_markup=reply_markup
         )
     except Exception as e:
         logger.error(f"Ошибка в /list: {e}")
-        await update.message.reply_text("❌ *Ошибка загрузки каталога*", parse_mode="Markdown")
+        await send_response(update, context, "❌ *Ошибка загрузки каталога*")
 
 async def product_callback(update, context):
     query = update.callback_query
@@ -207,11 +202,7 @@ async def successful_payment(update, context):
         )
 
 async def redeem_key(update, context):
-    await update.message.reply_text(
-        "🎫 *Активация ключа*\n\n"
-        "Введите ваш ключ активации:",
-        parse_mode="Markdown"
-    )
+    await send_response(update, context, "🎫 *Активация ключа*\n\nВведите ваш ключ активации:")
     context.user_data['awaiting_key'] = True
 
 async def handle_key_input(update, context):
@@ -268,11 +259,10 @@ async def handle_key_input(update, context):
     context.user_data['awaiting_key'] = False
 
 async def tech_support(update, context):
-    await update.message.reply_text(
+    await send_response(update, context,
         "🛠️ *Техническая поддержка*\n\n"
         "✏️ *Опишите вашу проблему одним сообщением.*\n"
-        "👨‍💻 *Мы свяжемся с вами в ближайшее время.*",
-        parse_mode="Markdown"
+        "👨‍💻 *Мы свяжемся с вами в ближайшее время.*"
     )
     context.user_data['awaiting_tech'] = True
 
@@ -388,17 +378,17 @@ def main():
     application.add_handler(CommandHandler("tech", tech_support))
     application.add_handler(CommandHandler("check", check))
     application.add_handler(CommandHandler("reply", reply_user))
-    application.add_handler(CallbackQueryHandler(main_menu_callback))
     
-    # Обработчики
+    # ОБРАБОТЧИКИ КНОПОК
+    # Сначала проверяем покупку, потом общее меню
     application.add_handler(CallbackQueryHandler(product_callback, pattern="^buy_"))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
+    application.add_handler(CallbackQueryHandler(main_menu_callback)) 
     
-    # Платежи
+    # Остальное
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     application.add_handler(PreCheckoutQueryHandler(pre_checkout_query))
     application.add_handler(MessageHandler(filters.SUCCESSFUL_PAYMENT, successful_payment))
     
-    logger.info("🚀 HACK.NET бот запущен!")
     application.run_polling()
 
 if __name__ == "__main__":
